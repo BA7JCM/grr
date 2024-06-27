@@ -6,11 +6,8 @@ from absl import app
 from absl.testing import absltest
 
 from grr_response_core.lib import rdfvalue
-from grr_response_core.lib.rdfvalues import client as rdf_client
-from grr_response_core.lib.rdfvalues import structs as rdf_structs
 from grr_response_server.databases import db
 from grr_response_server.databases import db_utils
-from grr_response_server.rdfvalues import objects as rdf_objects
 from grr.test_lib import stats_test_lib
 from grr.test_lib import test_lib
 
@@ -265,6 +262,11 @@ class CallLoggedTest(absltest.TestCase):
     logger.setLevel(logging.DEBUG)
     self.addCleanup(lambda: logger.setLevel(old_log_level))
 
+    # We also need to make sure logging hasn't been disabled.
+    old_log_level_override = logger.manager.disable
+    logging.disable(logging.NOTSET)
+    self.addCleanup(lambda: logging.disable(old_log_level_override))
+
   def testArgsAndResultPropagated(self):
     @db_utils.CallLogged
     def SampleCall(arg: int, kwarg: int = 0) -> Tuple[int, int]:
@@ -351,27 +353,6 @@ class IdToIntConversionTest(absltest.TestCase):
     self.assertEqual(
         db_utils.IntToHuntID(0xFFFFFFFFFFFFFFFF), "FFFFFFFFFFFFFFFF"
     )
-
-
-class ParseAndUnpackAnyTest(absltest.TestCase):
-
-  def testUnpacksKnownRdfStruct(self):
-    user = rdf_client.User()
-    user.username = "foo"
-    payload = rdf_structs.AnyValue.Pack(user).SerializeToBytes()
-
-    result = db_utils.ParseAndUnpackAny("User", payload)
-    self.assertIsInstance(result, rdf_client.User)
-
-  def testReturnsFallbackvalueIfRdfTypeNotKnown(self):
-    user = rdf_client.User()
-    user.username = "foo"
-    payload = rdf_structs.AnyValue.Pack(user).SerializeToBytes()
-
-    result = db_utils.ParseAndUnpackAny("_SomeUnknownType", payload)
-    self.assertIsInstance(result, rdf_objects.SerializedValueOfUnrecognizedType)
-    self.assertEqual(result.type_name, "_SomeUnknownType")
-    self.assertEqual(result.value, user.SerializeToBytes())
 
 
 _one_second_timestamp = rdfvalue.RDFDatetime.FromSecondsSinceEpoch(1)

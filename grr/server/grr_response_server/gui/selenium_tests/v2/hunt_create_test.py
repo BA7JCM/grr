@@ -1,9 +1,15 @@
 #!/usr/bin/env python
+import datetime
 from typing import Iterable
 
 from absl import app
 
+from grr_response_core.lib.rdfvalues import config as rdf_config
 from grr_response_core.lib.rdfvalues import paths as rdf_paths
+from grr_response_core.lib.util import retry
+from grr_response_proto import flows_pb2
+from grr_response_server.flows.general import mig_network
+from grr_response_server.flows.general import mig_transfer
 from grr_response_server.flows.general import network
 from grr_response_server.flows.general import transfer
 from grr_response_server.gui import api_call_context
@@ -16,19 +22,28 @@ from grr.test_lib import hunt_test_lib
 from grr.test_lib import test_lib
 
 
-def _ListHunts(creator: str) -> Iterable[api_hunt.ApiHunt]:
-  handler = api_hunt.ApiListHuntsHandler()
-  result = handler.Handle(
-      api_hunt.ApiListHuntsArgs(created_by=creator, with_full_summary=True),
-      context=api_call_context.ApiCallContext(username=creator),
-  )
-  return result.items
-
-
 class HuntCreationTest(
     hunt_test_lib.StandardHuntTestMixin, gui_test_lib.GRRSeleniumTest
 ):
   """Tests the hunt creation."""
+
+  @retry.On(
+      AssertionError,
+      opts=retry.Opts(
+          attempts=3,
+          init_delay=datetime.timedelta(seconds=1),
+      ),
+  )
+  def _ListHuntsAndAssertCount(
+      self, creator: str, expected_count: int
+  ) -> Iterable[api_hunt.ApiHunt]:
+    handler = api_hunt.ApiListHuntsHandler()
+    result = handler.Handle(
+        api_hunt.ApiListHuntsArgs(created_by=creator, with_full_summary=True),
+        context=api_call_context.ApiCallContext(username=creator),
+    )
+    self.assertLen(result.items, expected_count)
+    return result.items
 
   def testCreateHuntFromFlow(self):
     client_id = self.SetupClient(0)
@@ -71,11 +86,12 @@ class HuntCreationTest(
     self.Type("css=approval-card input[name=reason]", "because")
     self.Click("css=button[id=runHunt]")
 
-    hunts = _ListHunts(self.test_username)
-    self.assertLen(hunts, 1)
-
+    hunts = self._ListHuntsAndAssertCount(self.test_username, 1)
     self.assertEqual(hunts[0].creator, self.test_username)
-    self.assertEqual(hunts[0].flow_args, flow_args)  # Ensure proper copy.
+    unpacked_flow_args = flows_pb2.NetstatArgs()
+    hunts[0].flow_args.Unpack(unpacked_flow_args)
+    unpacked_flow_args_rdf = mig_network.ToRDFNetstatArgs(unpacked_flow_args)
+    self.assertEqual(unpacked_flow_args_rdf, flow_args)  # Ensure proper copy.
 
     # Redirects to the new hunt page, check basic parts of the page are shown.
     self.WaitUntilEqual(f"/v2/hunts/{hunts[0].hunt_id}", self.GetCurrentUrlPath)
@@ -180,8 +196,7 @@ class HuntCreationTest(
         self.IsElementPresent, "css=button:contains('View flow arguments')"
     )
 
-    hunts = _ListHunts(self.test_username)
-    self.assertLen(hunts, 2)
+    hunts = self._ListHuntsAndAssertCount(self.test_username, 2)
 
     if original_hunt_id == hunts[0].hunt_id:
       original_hunt = hunts[0]
@@ -191,13 +206,19 @@ class HuntCreationTest(
       copied_hunt = hunts[0]
 
     self.assertEqual(original_hunt.creator, self.test_username)
-    self.assertEqual(original_hunt.flow_args, original_hunt_flow_args)
+    unpacked_flow_args = flows_pb2.GetFileArgs()
+    original_hunt.flow_args.Unpack(unpacked_flow_args)
+    unpacked_flow_args_rdf = mig_transfer.ToRDFGetFileArgs(unpacked_flow_args)
+    self.assertEqual(unpacked_flow_args_rdf, original_hunt_flow_args)
     self.assertEqual(original_hunt.hunt_runner_args.client_rate, 60)
     self.assertEqual(original_hunt.hunt_runner_args.client_limit, 0)
     self.assertLen(original_hunt.hunt_runner_args.client_rule_set.rules, 1)
 
     self.assertEqual(copied_hunt.creator, self.test_username)
-    self.assertEqual(copied_hunt.flow_args, original_hunt_flow_args)
+    unpacked_flow_args = flows_pb2.GetFileArgs()
+    copied_hunt.flow_args.Unpack(unpacked_flow_args)
+    unpacked_flow_args_rdf = mig_transfer.ToRDFGetFileArgs(unpacked_flow_args)
+    self.assertEqual(unpacked_flow_args_rdf, original_hunt_flow_args)
     self.assertEqual(
         copied_hunt.original_object.hunt_reference.hunt_id, original_hunt_id
     )
@@ -258,10 +279,52 @@ class HuntCreationTest(
     self.Type("css=approval-card input[name=reason]", "because")
     self.Click("css=button[id=runHunt]")
 
-    hunts = _ListHunts(self.test_username)
-    self.assertEmpty(hunts)
-
+    self._ListHuntsAndAssertCount(self.test_username, 0)
     self.WaitUntil(self.IsElementPresent, "css=.mdc-snackbar")
+
+  def testHuntPresubmit(self):
+    client_id = self.SetupClient(0)
+    self.RequestAndGrantClientApproval(client_id)
+    flow_id = flow_test_lib.StartFlow(
+        network.Netstat,
+        creator=self.test_username,
+        client_id=client_id,
+        flow_args=network.NetstatArgs(),
+    )
+
+    hunt_cfg = rdf_config.AdminUIHuntConfig(
+        default_exclude_labels=["no-no"],
+        make_default_exclude_labels_a_presubmit_check=True,
+        presubmit_warning_message="not cool",
+    )
+    with test_lib.ConfigOverrider({"AdminUI.hunt_config": hunt_cfg}):
+      self.Open(f"/v2/new-hunt?clientId={client_id}&flowId={flow_id}")
+
+      # Make sure default exclude labels are displayed.
+      self.WaitUntil(
+          self.IsElementPresent, "css=input[id=condition_1_label_name_0]"
+      )
+      self.Type("css=input[id=condition_1_label_name_0]", "no-no")
+
+      self.WaitUntilNot(
+          self.IsElementPresent, "css=mat-card.warning:contains('not cool')"
+      )
+
+      # Removing the label should trigger the warning.
+      self.Click("css=[name=condition_1] button#close")
+
+      # Make sure the warning is now displayed.
+      self.WaitUntil(
+          self.IsElementPresent, "css=mat-card.warning:contains('not cool')"
+      )
+
+      # Fill out necessary approval information and create hunt.
+      self.Type("css=approval-card input[name=reason]", "because")
+      self.Click("css=button[id=runHunt]")
+
+      self._ListHuntsAndAssertCount(self.test_username, 0)
+      # Also fails in the API level,
+      self.WaitUntil(self.IsElementPresent, "css=.mdc-snackbar")
 
 
 if __name__ == "__main__":

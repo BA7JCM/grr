@@ -18,7 +18,7 @@ jobs:
         run: |
           devenv/devenv.sh start
           OK=false
-          for attempt in $(seq 10); do
+          for attempt in $(seq 20); do
             curl -su admin:admin http://localhost:4280/api/clients |
               sed 1d |
               jq -r ".items[].value.client_id.value" |
@@ -105,7 +105,7 @@ jobs:
           retention-days: 1
 
   build-osx:
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -227,7 +227,7 @@ jobs:
           name: grr_base_image
           path: /tmp/grr_base_image.tar
           retention-days: 3
-    
+
   docker-compose-e2e-test:
     permissions:
       contents: 'read'

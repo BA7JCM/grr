@@ -129,9 +129,8 @@ export class CollectFilesByKnownPathDetails extends Plugin {
 
   readonly fileResults$: Observable<readonly CollectFilesByKnownPathResult[]> =
     this.flowResultsLocalStore.results$.pipe(
-      map(
-        (results) =>
-          results?.map((data) => data.payload as CollectFilesByKnownPathResult),
+      map((results) =>
+        results?.map((data) => data.payload as CollectFilesByKnownPathResult),
       ),
     );
 

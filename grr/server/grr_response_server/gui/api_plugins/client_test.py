@@ -5,64 +5,22 @@ import ipaddress
 from unittest import mock
 
 from absl import app
-from absl.testing import absltest
 
 from google.protobuf import timestamp_pb2
 from google.protobuf import text_format
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib.rdfvalues import test_base as rdf_test_base
 from grr_response_proto import objects_pb2
+from grr_response_proto.api import client_pb2
 from grr_response_server import client_index
 from grr_response_server import data_store
 from grr_response_server import fleetspeak_connector
 from grr_response_server import fleetspeak_utils
 from grr_response_server.gui import api_test_lib
 from grr_response_server.gui.api_plugins import client as client_plugin
-from grr_response_server.rdfvalues import objects as rdf_objects
 from grr.test_lib import db_test_lib
 from grr.test_lib import test_lib
 from fleetspeak.src.server.proto.fleetspeak_server import admin_pb2
-
-
-class ApiClientTest(absltest.TestCase):
-
-  def testInitFromClientInfoAgeWithSnapshot(self):
-    first_seen_time = rdfvalue.RDFDatetime.FromHumanReadable("2022-01-01")
-    last_snapshot_time = rdfvalue.RDFDatetime.FromHumanReadable("2022-02-02")
-
-    info = rdf_objects.ClientFullInfo()
-    info.metadata.first_seen = first_seen_time
-    info.last_snapshot.client_id = "C.1122334455667788"
-    info.last_snapshot.timestamp = last_snapshot_time
-
-    client = client_plugin.ApiClient()
-    client.InitFromClientInfo("C.1122334455667788", info)
-
-    self.assertEqual(client.age, last_snapshot_time)
-
-  def testInitFromClientInfoWithoutSnapshot(self):
-    first_seen_time = rdfvalue.RDFDatetime.FromHumanReadable("2022-01-01")
-
-    info = rdf_objects.ClientFullInfo()
-    info.metadata.first_seen = first_seen_time
-
-    client = client_plugin.ApiClient()
-    client.InitFromClientInfo("C.1122334455667788", info)
-
-    self.assertEqual(client.age, first_seen_time)
-
-  def testInitFromClientInfoRRG(self):
-    info = rdf_objects.ClientFullInfo()
-    info.last_rrg_startup.args = ["--foo", "--bar", "--baz"]
-    info.last_rrg_startup.metadata.version.major = 1
-    info.last_rrg_startup.metadata.version.minor = 2
-    info.last_rrg_startup.metadata.version.patch = 3
-
-    api_client = client_plugin.ApiClient()
-    api_client.InitFromClientInfo("C.0123456789ABCDEF", info)
-
-    self.assertEqual(api_client.rrg_version, "1.2.3")
-    self.assertEqual(api_client.rrg_args, ["--foo", "--bar", "--baz"])
 
 
 class ApiClientIdTest(rdf_test_base.RDFValueTestMixin, test_lib.GRRBaseTest):
@@ -108,14 +66,16 @@ class ApiAddClientsLabelsHandlerTest(api_test_lib.ApiCallHandlerTest):
 
   def testAddsSingleLabelToSingleClient(self):
     self.handler.Handle(
-        client_plugin.ApiAddClientsLabelsArgs(
-            client_ids=[self.client_ids[0]], labels=[u"foo"]),
-        context=self.context)
+        client_pb2.ApiAddClientsLabelsArgs(
+            client_ids=[self.client_ids[0]], labels=["foo"]
+        ),
+        context=self.context,
+    )
 
     cid = self.client_ids[0]
     labels = data_store.REL_DB.ReadClientLabels(cid)
     self.assertLen(labels, 1)
-    self.assertEqual(labels[0].name, u"foo")
+    self.assertEqual(labels[0].name, "foo")
     self.assertEqual(labels[0].owner, self.context.username)
 
     for client_id in self.client_ids[1:]:
@@ -123,17 +83,19 @@ class ApiAddClientsLabelsHandlerTest(api_test_lib.ApiCallHandlerTest):
 
   def testAddsTwoLabelsToTwoClients(self):
     self.handler.Handle(
-        client_plugin.ApiAddClientsLabelsArgs(
+        client_pb2.ApiAddClientsLabelsArgs(
             client_ids=[self.client_ids[0], self.client_ids[1]],
-            labels=[u"foo", u"bar"]),
-        context=self.context)
+            labels=["foo", "bar"],
+        ),
+        context=self.context,
+    )
 
     for client_id in self.client_ids[:2]:
       labels = data_store.REL_DB.ReadClientLabels(client_id)
       self.assertLen(labels, 2)
       self.assertEqual(labels[0].owner, self.context.username)
       self.assertEqual(labels[1].owner, self.context.username)
-      self.assertCountEqual([labels[0].name, labels[1].name], [u"bar", u"foo"])
+      self.assertCountEqual([labels[0].name, labels[1].name], ["bar", "foo"])
 
     self.assertFalse(data_store.REL_DB.ReadClientLabels(self.client_ids[2]))
 
@@ -146,7 +108,7 @@ class ApiAddClientsLabelsHandlerTest(api_test_lib.ApiCallHandlerTest):
     )
 
     self.handler.Handle(
-        client_plugin.ApiAddClientsLabelsArgs(client_ids=[cid], labels=["foo"]),
+        client_pb2.ApiAddClientsLabelsArgs(client_ids=[cid], labels=["foo"]),
         context=self.context,
     )
 
@@ -168,30 +130,35 @@ class ApiRemoveClientsLabelsHandlerTest(api_test_lib.ApiCallHandlerTest):
 
   def testRemovesUserLabelFromSingleClient(self):
     data_store.REL_DB.WriteClientMetadata(self.client_ids[0])
-    data_store.REL_DB.AddClientLabels(self.client_ids[0], self.context.username,
-                                      [u"foo", u"bar"])
+    data_store.REL_DB.AddClientLabels(
+        self.client_ids[0], self.context.username, ["foo", "bar"]
+    )
 
     self.handler.Handle(
-        client_plugin.ApiRemoveClientsLabelsArgs(
-            client_ids=[self.client_ids[0]], labels=[u"foo"]),
-        context=self.context)
+        client_pb2.ApiRemoveClientsLabelsArgs(
+            client_ids=[self.client_ids[0]], labels=["foo"]
+        ),
+        context=self.context,
+    )
 
     labels = data_store.REL_DB.ReadClientLabels(self.client_ids[0])
     self.assertLen(labels, 1)
-    self.assertEqual(labels[0].name, u"bar")
+    self.assertEqual(labels[0].name, "bar")
     self.assertEqual(labels[0].owner, self.context.username)
 
   def testDoesNotRemoveSystemLabelFromSingleClient(self):
     data_store.REL_DB.WriteClientMetadata(self.client_ids[0])
     data_store.REL_DB.WriteGRRUser("GRR")
-    data_store.REL_DB.AddClientLabels(self.client_ids[0], u"GRR", [u"foo"])
+    data_store.REL_DB.AddClientLabels(self.client_ids[0], "GRR", ["foo"])
     idx = client_index.ClientIndex()
-    idx.AddClientLabels(self.client_ids[0], [u"foo"])
+    idx.AddClientLabels(self.client_ids[0], ["foo"])
 
     self.handler.Handle(
-        client_plugin.ApiRemoveClientsLabelsArgs(
-            client_ids=[self.client_ids[0]], labels=[u"foo"]),
-        context=self.context)
+        client_pb2.ApiRemoveClientsLabelsArgs(
+            client_ids=[self.client_ids[0]], labels=["foo"]
+        ),
+        context=self.context,
+    )
 
     labels = data_store.REL_DB.ReadClientLabels(self.client_ids[0])
     self.assertLen(labels, 1)
@@ -203,27 +170,31 @@ class ApiRemoveClientsLabelsHandlerTest(api_test_lib.ApiCallHandlerTest):
     data_store.REL_DB.WriteGRRUser("GRR")
 
     data_store.REL_DB.WriteClientMetadata(self.client_ids[0])
-    data_store.REL_DB.AddClientLabels(self.client_ids[0], self.context.username,
-                                      [u"foo"])
-    data_store.REL_DB.AddClientLabels(self.client_ids[0], u"GRR", [u"foo"])
+    data_store.REL_DB.AddClientLabels(
+        self.client_ids[0], self.context.username, ["foo"]
+    )
+    data_store.REL_DB.AddClientLabels(self.client_ids[0], "GRR", ["foo"])
     idx = client_index.ClientIndex()
-    idx.AddClientLabels(self.client_ids[0], [u"foo"])
+    idx.AddClientLabels(self.client_ids[0], ["foo"])
 
     self.handler.Handle(
-        client_plugin.ApiRemoveClientsLabelsArgs(
-            client_ids=[self.client_ids[0]], labels=[u"foo"]),
-        context=self.context)
+        client_pb2.ApiRemoveClientsLabelsArgs(
+            client_ids=[self.client_ids[0]], labels=["foo"]
+        ),
+        context=self.context,
+    )
 
     labels = data_store.REL_DB.ReadClientLabels(self.client_ids[0])
     self.assertLen(labels, 1)
-    self.assertEqual(labels[0].name, u"foo")
-    self.assertEqual(labels[0].owner, u"GRR")
+    self.assertEqual(labels[0].name, "foo")
+    self.assertEqual(labels[0].owner, "GRR")
     # The label is still in the index.
     self.assertEqual(idx.LookupClients(["label:foo"]), [self.client_ids[0]])
 
 
 class ApiLabelsRestrictedSearchClientsHandlerTestRelational(
-    api_test_lib.ApiCallHandlerTest):
+    api_test_lib.ApiCallHandlerTest
+):
   """Tests ApiLabelsRestrictedSearchClientsHandler."""
 
   def setUp(self):
@@ -235,32 +206,32 @@ class ApiLabelsRestrictedSearchClientsHandlerTestRelational(
     data_store.REL_DB.WriteGRRUser("peter")
     data_store.REL_DB.WriteGRRUser("peter_oth")
 
-    data_store.REL_DB.AddClientLabels(self.client_ids[0], u"david", [u"foo"])
-    data_store.REL_DB.AddClientLabels(self.client_ids[1], u"david",
-                                      [u"not-foo"])
-    data_store.REL_DB.AddClientLabels(self.client_ids[2], u"peter_oth",
-                                      [u"bar"])
-    data_store.REL_DB.AddClientLabels(self.client_ids[3], u"peter", [u"bar"])
+    data_store.REL_DB.AddClientLabels(self.client_ids[0], "david", ["foo"])
+    data_store.REL_DB.AddClientLabels(self.client_ids[1], "david", ["not-foo"])
+    data_store.REL_DB.AddClientLabels(self.client_ids[2], "peter_oth", ["bar"])
+    data_store.REL_DB.AddClientLabels(self.client_ids[3], "peter", ["bar"])
 
     index = client_index.ClientIndex()
-    index.AddClientLabels(self.client_ids[0], [u"foo"])
-    index.AddClientLabels(self.client_ids[1], [u"not-foo"])
-    index.AddClientLabels(self.client_ids[2], [u"bar"])
-    index.AddClientLabels(self.client_ids[3], [u"bar"])
+    index.AddClientLabels(self.client_ids[0], ["foo"])
+    index.AddClientLabels(self.client_ids[1], ["not-foo"])
+    index.AddClientLabels(self.client_ids[2], ["bar"])
+    index.AddClientLabels(self.client_ids[3], ["bar"])
 
     self.handler = client_plugin.ApiLabelsRestrictedSearchClientsHandler(
-        allow_labels=[u"foo", u"bar"], allow_labels_owners=[u"david", u"peter"])
+        allow_labels=["foo", "bar"], allow_labels_owners=["david", "peter"]
+    )
 
   def _Setup100Clients(self):
     self.client_ids = self.SetupClients(100)
     index = client_index.ClientIndex()
     for client_id in self.client_ids:
-      data_store.REL_DB.AddClientLabels(client_id, u"david", [u"foo"])
-      index.AddClientLabels(client_id, [u"foo"])
+      data_store.REL_DB.AddClientLabels(client_id, "david", ["foo"])
+      index.AddClientLabels(client_id, ["foo"])
 
   def testSearchWithoutArgsReturnsOnlyClientsWithAllowedLabels(self):
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(), context=self.context)
+        client_pb2.ApiSearchClientsArgs(), context=self.context
+    )
 
     self.assertLen(result.items, 2)
     sorted_items = sorted(result.items, key=lambda r: r.client_id)
@@ -270,64 +241,77 @@ class ApiLabelsRestrictedSearchClientsHandlerTestRelational(
 
   def testSearchWithNonAllowedLabelReturnsNothing(self):
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query="label:not-foo"),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query="label:not-foo"),
+        context=self.context,
+    )
     self.assertFalse(result.items)
 
   def testSearchWithAllowedLabelReturnsSubSet(self):
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query="label:foo"),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query="label:foo"),
+        context=self.context,
+    )
     self.assertLen(result.items, 1)
     self.assertEqual(result.items[0].client_id, self.client_ids[0])
 
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query="label:bar"),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query="label:bar"),
+        context=self.context,
+    )
     self.assertLen(result.items, 1)
     self.assertEqual(result.items[0].client_id, self.client_ids[3])
 
   def testSearchWithAllowedClientIdsReturnsSubSet(self):
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query=self.client_ids[0]),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query=self.client_ids[0]),
+        context=self.context,
+    )
     self.assertLen(result.items, 1)
     self.assertEqual(result.items[0].client_id, self.client_ids[0])
 
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query=self.client_ids[3]),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query=self.client_ids[3]),
+        context=self.context,
+    )
     self.assertLen(result.items, 1)
     self.assertEqual(result.items[0].client_id, self.client_ids[3])
 
   def testSearchWithDisallowedClientIdsReturnsNothing(self):
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query=self.client_ids[1]),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query=self.client_ids[1]),
+        context=self.context,
+    )
     self.assertFalse(result.items)
 
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query=self.client_ids[2]),
-        context=self.context)
+        client_pb2.ApiSearchClientsArgs(query=self.client_ids[2]),
+        context=self.context,
+    )
     self.assertFalse(result.items)
 
   def testSearchOrder(self):
     self._Setup100Clients()
 
     result = self.handler.Handle(
-        client_plugin.ApiSearchClientsArgs(
-            query="label:foo", offset=0, count=1000),
-        context=self.context)
-    self.assertEqual([str(res.client_id) for res in result.items],
-                     self.client_ids)
+        client_pb2.ApiSearchClientsArgs(
+            query="label:foo", offset=0, count=1000
+        ),
+        context=self.context,
+    )
+    self.assertEqual(
+        [str(res.client_id) for res in result.items], self.client_ids
+    )
 
     result = []
     for offset, count in [(0, 10), (10, 40), (50, 25), (75, 500)]:
       result.extend(
           self.handler.Handle(
-              client_plugin.ApiSearchClientsArgs(
-                  query="label:foo", offset=offset, count=count),
-              context=self.context).items)
+              client_pb2.ApiSearchClientsArgs(
+                  query="label:foo", offset=offset, count=count
+              ),
+              context=self.context,
+          ).items
+      )
     self.assertEqual([str(res.client_id) for res in result], self.client_ids)
 
 
@@ -342,7 +326,7 @@ class ApiInterrogateClientHandlerTest(api_test_lib.ApiCallHandlerTest):
   def testInterrogateFlowIsStarted(self):
     self.assertEmpty(data_store.REL_DB.ReadAllFlowObjects(self.client_id))
 
-    args = client_plugin.ApiInterrogateClientArgs(client_id=self.client_id)
+    args = client_pb2.ApiInterrogateClientArgs(client_id=self.client_id)
     result = self.handler.Handle(args, context=self.context)
 
     results = data_store.REL_DB.ReadAllFlowObjects(self.client_id)
@@ -360,13 +344,13 @@ class ApiGetClientVersionTimesTest(api_test_lib.ApiCallHandlerTest):
 
   def testHandler(self):
     self._SetUpClient()
-    args = client_plugin.ApiGetClientVersionTimesArgs(client_id=self.client_id)
+    args = client_pb2.ApiGetClientVersionTimesArgs(client_id=self.client_id)
     result = self.handler.Handle(args, context=self.context)
 
     self.assertLen(result.times, 3)
-    self.assertEqual(result.times[0].AsSecondsSinceEpoch(), 100)
-    self.assertEqual(result.times[1].AsSecondsSinceEpoch(), 45)
-    self.assertEqual(result.times[2].AsSecondsSinceEpoch(), 42)
+    self.assertEqual(result.times[0], 100_000_000)
+    self.assertEqual(result.times[1], 45_000_000)
+    self.assertEqual(result.times[2], 42_000_000)
 
   def _SetUpClient(self):
     for time in [42, 45, 100]:
@@ -394,7 +378,7 @@ class ApiGetClientVersionsTest(api_test_lib.ApiCallHandlerTest):
         client.knowledge_base.fqdn = self.fqdn
         data_store.REL_DB.WriteClientSnapshot(client)
 
-    args = client_plugin.ApiGetClientVersionsArgs(client_id=self.client_id)
+    args = client_pb2.ApiGetClientVersionsArgs(client_id=self.client_id)
     with test_lib.FakeTime(101):
       result = self.handler.Handle(args, context=self.context)
 
@@ -422,10 +406,10 @@ class ApiGetClientVersionsTest(api_test_lib.ApiCallHandlerTest):
         client.knowledge_base.fqdn = self.fqdn
         data_store.REL_DB.WriteClientSnapshot(client)
 
-    args = client_plugin.ApiGetClientVersionsArgs(
+    args = client_pb2.ApiGetClientVersionsArgs(
         client_id=self.client_id,
-        start=rdfvalue.RDFDatetime.FromSecondsSinceEpoch(43),
-        end=rdfvalue.RDFDatetime.FromSecondsSinceEpoch(53),
+        start=43000000,
+        end=53000000,
     )
     with test_lib.FakeTime(101):
       result = self.handler.Handle(args, context=self.context)
@@ -445,13 +429,13 @@ def TSProtoFromString(string):
 class ApiFleetspeakIntegrationTest(api_test_lib.ApiCallHandlerTest):
 
   def testUpdateClientsFromFleetspeak(self):
-    client_id_1 = client_plugin.ApiClientId("C." + "1" * 16)
-    client_id_2 = client_plugin.ApiClientId("C." + "2" * 16)
-    client_id_3 = client_plugin.ApiClientId("C." + "3" * 16)
+    client_id_1 = "C." + "1" * 16
+    client_id_2 = "C." + "2" * 16
+    client_id_3 = "C." + "3" * 16
     clients = [
-        client_plugin.ApiClient(client_id=client_id_1),
-        client_plugin.ApiClient(client_id=client_id_2),
-        client_plugin.ApiClient(client_id=client_id_3),
+        client_pb2.ApiClient(client_id=client_id_1),
+        client_pb2.ApiClient(client_id=client_id_2),
+        client_pb2.ApiClient(client_id=client_id_3),
     ]
     conn = mock.MagicMock()
     conn.outgoing.ListClients.return_value = admin_pb2.ListClientsResponse(
@@ -459,36 +443,39 @@ class ApiFleetspeakIntegrationTest(api_test_lib.ApiCallHandlerTest):
             admin_pb2.Client(
                 client_id=fleetspeak_utils.GRRIDToFleetspeakID(client_id_1),
                 last_contact_time=TSProtoFromString("2018-01-01T00:00:01Z"),
-                last_clock=TSProtoFromString("2018-01-01T00:00:02Z")),
+                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"),
+            ),
             admin_pb2.Client(
                 client_id=fleetspeak_utils.GRRIDToFleetspeakID(client_id_2),
                 last_contact_time=TSProtoFromString("2018-01-02T00:00:01Z"),
-                last_clock=TSProtoFromString("2018-01-02T00:00:02Z"))
-        ])
+                last_clock=TSProtoFromString("2018-01-02T00:00:02Z"),
+            ),
+        ]
+    )
     with mock.patch.object(fleetspeak_connector, "CONN", conn):
       client_plugin.UpdateClientsFromFleetspeak(clients)
     self.assertEqual(
         clients,
         [
-            client_plugin.ApiClient(
+            client_pb2.ApiClient(
                 client_id=client_id_1,
                 last_seen_at=rdfvalue.RDFDatetime.FromHumanReadable(
                     "2018-01-01T00:00:01Z"
-                ),
+                ).AsMicrosecondsSinceEpoch(),
                 last_clock=rdfvalue.RDFDatetime.FromHumanReadable(
                     "2018-01-01T00:00:02Z"
-                ),
+                ).AsMicrosecondsSinceEpoch(),
             ),
-            client_plugin.ApiClient(
+            client_pb2.ApiClient(
                 client_id=client_id_2,
                 last_seen_at=rdfvalue.RDFDatetime.FromHumanReadable(
                     "2018-01-02T00:00:01Z"
-                ),
+                ).AsMicrosecondsSinceEpoch(),
                 last_clock=rdfvalue.RDFDatetime.FromHumanReadable(
                     "2018-01-02T00:00:02Z"
-                ),
+                ).AsMicrosecondsSinceEpoch(),
             ),
-            client_plugin.ApiClient(client_id=client_id_3),
+            client_pb2.ApiClient(client_id=client_id_3),
         ],
     )
 
@@ -501,8 +488,10 @@ class ApiFleetspeakIntegrationTest(api_test_lib.ApiCallHandlerTest):
                 client_id=fleetspeak_utils.GRRIDToFleetspeakID(client_id),
                 last_contact_address="100.1.1.100:50000",
                 last_contact_time=TSProtoFromString("2018-01-01T00:00:01Z"),
-                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"))
-        ])
+                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"),
+            )
+        ]
+    )
     with mock.patch.object(fleetspeak_connector, "CONN", conn):
       ip_str, ipaddr_obj = client_plugin._GetAddrFromFleetspeak(client_id)
       self.assertEqual(ip_str, "100.1.1.100")
@@ -517,14 +506,17 @@ class ApiFleetspeakIntegrationTest(api_test_lib.ApiCallHandlerTest):
                 client_id=fleetspeak_utils.GRRIDToFleetspeakID(client_id),
                 last_contact_address="[2001:0db8:85a3::8a2e:0370:7334]:50000",
                 last_contact_time=TSProtoFromString("2018-01-01T00:00:01Z"),
-                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"))
-        ])
+                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"),
+            )
+        ]
+    )
     with mock.patch.object(fleetspeak_connector, "CONN", conn):
       ip_str, ipaddr_obj = client_plugin._GetAddrFromFleetspeak(client_id)
       self.assertEqual(ip_str, "2001:0db8:85a3::8a2e:0370:7334")
       self.assertEqual(
           ipaddr_obj,
-          ipaddress.ip_address("2001:0db8:85a3:0000:0000:8a2e:0370:7334"))
+          ipaddress.ip_address("2001:0db8:85a3:0000:0000:8a2e:0370:7334"),
+      )
 
   def testGetAddrFromFleetspeakMissing(self):
     client_id = client_plugin.ApiClientId("C." + "1" * 16)
@@ -534,8 +526,10 @@ class ApiFleetspeakIntegrationTest(api_test_lib.ApiCallHandlerTest):
             admin_pb2.Client(
                 client_id=fleetspeak_utils.GRRIDToFleetspeakID(client_id),
                 last_contact_time=TSProtoFromString("2018-01-01T00:00:01Z"),
-                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"))
-        ])
+                last_clock=TSProtoFromString("2018-01-01T00:00:02Z"),
+            )
+        ]
+    )
     with mock.patch.object(fleetspeak_connector, "CONN", conn):
       ip_str, ipaddr_obj = client_plugin._GetAddrFromFleetspeak(client_id)
       self.assertEqual(ip_str, "")
@@ -551,21 +545,26 @@ class ApiSearchClientsHandlerTest(api_test_lib.ApiCallHandlerTest):
     self.add_labels_handler = client_plugin.ApiAddClientsLabelsHandler()
 
   def _AddLabels(self, client_id, labels):
-    args = client_plugin.ApiAddClientsLabelsArgs()
-    args.client_ids = [client_id]
-    args.labels = labels
+    args = client_pb2.ApiAddClientsLabelsArgs(
+        client_ids=[client_id],
+        labels=labels,
+    )
     self.add_labels_handler.Handle(args=args, context=self.context)
 
   def testSearchByLabel(self):
     client_id = self.SetupClient(
-        0, ping=rdfvalue.RDFDatetime.FromSecondsSinceEpoch(13))
+        0, ping=rdfvalue.RDFDatetime.FromSecondsSinceEpoch(13)
+    )
     self._AddLabels(client_id, labels=["foo"])
     api_result = self.search_handler.Handle(
-        client_plugin.ApiSearchClientsArgs(query="label:foo"))
+        client_pb2.ApiSearchClientsArgs(query="label:foo")
+    )
     self.assertLen(api_result.items, 1)
     self.assertEqual(api_result.items[0].client_id, client_id)
-    self.assertEqual(api_result.items[0].last_seen_at,
-                     rdfvalue.RDFDatetime.FromSecondsSinceEpoch(13))
+    self.assertEqual(
+        api_result.items[0].last_seen_at,
+        int(rdfvalue.RDFDatetime.FromSecondsSinceEpoch(13)),
+    )
 
   def testUnicode(self):
     client_a_id = self.SetupClient(0)
@@ -574,15 +573,17 @@ class ApiSearchClientsHandlerTest(api_test_lib.ApiCallHandlerTest):
     client_b_id = self.SetupClient(1)
     self._AddLabels(client_b_id, labels=["orłosęp"])
 
-    args_a = client_plugin.ApiSearchClientsArgs(
-        query="label:gżegżółka", offset=0, count=128)
+    args_a = client_pb2.ApiSearchClientsArgs(
+        query="label:gżegżółka", offset=0, count=128
+    )
 
     result_a = self.search_handler.Handle(args_a, context=self.context)
     self.assertLen(result_a.items, 1)
     self.assertEqual(result_a.items[0].client_id, client_a_id)
 
-    args_b = client_plugin.ApiSearchClientsArgs(
-        query="label:orłosęp", offset=0, count=128)
+    args_b = client_pb2.ApiSearchClientsArgs(
+        query="label:orłosęp", offset=0, count=128
+    )
 
     result_b = self.search_handler.Handle(args_b, context=self.context)
     self.assertLen(result_b.items, 1)
@@ -595,8 +596,9 @@ class ApiSearchClientsHandlerTest(api_test_lib.ApiCallHandlerTest):
     client_b_id = self.SetupClient(1)
     self._AddLabels(client_b_id, labels=["nurogęś", "ścierwnik"])
 
-    args = client_plugin.ApiSearchClientsArgs(
-        query="label:ścierwnik", offset=0, count=1000)
+    args = client_pb2.ApiSearchClientsArgs(
+        query="label:ścierwnik", offset=0, count=1000
+    )
 
     result = self.search_handler.Handle(args, context=self.context)
     result_client_ids = [item.client_id for item in result.items]
@@ -612,8 +614,9 @@ class ApiSearchClientsHandlerTest(api_test_lib.ApiCallHandlerTest):
     client_c_id = self.SetupClient(2)
     self._AddLabels(client_c_id, labels=["raróg", "sokół", "gołąb"])
 
-    args = client_plugin.ApiSearchClientsArgs(
-        query="label:raróg label:sokół", offset=0, count=1000)
+    args = client_pb2.ApiSearchClientsArgs(
+        query="label:raróg label:sokół", offset=0, count=1000
+    )
 
     result = self.search_handler.Handle(args, context=self.context)
     result_client_ids = [item.client_id for item in result.items]
@@ -622,10 +625,12 @@ class ApiSearchClientsHandlerTest(api_test_lib.ApiCallHandlerTest):
   def testUnicodeQuoted(self):
     client_id = self.SetupClient(0)
     self._AddLabels(
-        client_id, labels=["dzięcioł białoszyi", "świergotek łąkowy"])
+        client_id, labels=["dzięcioł białoszyi", "świergotek łąkowy"]
+    )
 
-    args = client_plugin.ApiSearchClientsArgs(
-        query="label:'dzięcioł białoszyi' label:'świergotek łąkowy'")
+    args = client_pb2.ApiSearchClientsArgs(
+        query="label:'dzięcioł białoszyi' label:'świergotek łąkowy'"
+    )
 
     result = self.search_handler.Handle(args, context=self.context)
     self.assertLen(result.items, 1)
@@ -633,29 +638,33 @@ class ApiSearchClientsHandlerTest(api_test_lib.ApiCallHandlerTest):
 
 
 class ApiGetFleetspeakPendingMessageCountHandlerTest(
-    api_test_lib.ApiCallHandlerTest):
+    api_test_lib.ApiCallHandlerTest
+):
 
   @mock.patch.object(fleetspeak_connector, "CONN")
   def testHandle(self, _):
     handler = client_plugin.ApiGetFleetspeakPendingMessageCountHandler()
-    args = client_plugin.ApiGetFleetspeakPendingMessageCountArgs(
-        client_id="C.1111111111111111")
+    args = client_pb2.ApiGetFleetspeakPendingMessageCountArgs(
+        client_id="C.1111111111111111"
+    )
     with mock.patch.object(
-        fleetspeak_utils, "GetFleetspeakPendingMessageCount",
-        return_value=42) as mock_get:
+        fleetspeak_utils, "GetFleetspeakPendingMessageCount", return_value=42
+    ) as mock_get:
       result = handler.Handle(args)
       self.assertEqual(mock_get.call_args[0][0], "C.1111111111111111")
       self.assertEqual(result.count, 42)
 
 
-class ApiGetFleetspeakPendingMessagesHandlerTest(api_test_lib.ApiCallHandlerTest
-                                                ):
+class ApiGetFleetspeakPendingMessagesHandlerTest(
+    api_test_lib.ApiCallHandlerTest
+):
 
   @mock.patch.object(fleetspeak_connector, "CONN")
   def testHandle(self, _):
     handler = client_plugin.ApiGetFleetspeakPendingMessagesHandler()
-    args = client_plugin.ApiGetFleetspeakPendingMessagesArgs(
-        client_id="C.1111111111111111", offset=1, limit=2, want_data=True)
+    args = client_pb2.ApiGetFleetspeakPendingMessagesArgs(
+        client_id="C.1111111111111111", offset=1, limit=2, want_data=True
+    )
     fleetspeak_proto = admin_pb2.GetPendingMessagesResponse()
     text_format.Parse(
         """
@@ -703,8 +712,11 @@ class ApiGetFleetspeakPendingMessagesHandlerTest(api_test_lib.ApiCallHandlerTest
             }
           }
         }
-        """, fleetspeak_proto)
-    expected_result = client_plugin.ApiGetFleetspeakPendingMessagesResult.FromTextFormat(
+        """,
+        fleetspeak_proto,
+    )
+    expected_result = client_pb2.ApiGetFleetspeakPendingMessagesResult()
+    text_format.Parse(
         """
         messages: {
           message_id: "m1"
@@ -744,11 +756,14 @@ class ApiGetFleetspeakPendingMessagesHandlerTest(api_test_lib.ApiCallHandlerTest
             }
           }
         }
-        """)
+        """,
+        expected_result,
+    )
     with mock.patch.object(
         fleetspeak_utils,
         "GetFleetspeakPendingMessages",
-        return_value=fleetspeak_proto) as mock_get:
+        return_value=fleetspeak_proto,
+    ) as mock_get:
       result = handler.Handle(args)
       self.assertEqual(mock_get.call_args[0][0], "C.1111111111111111")
       self.assertEqual(mock_get.call_args[1]["offset"], 1)
@@ -759,8 +774,9 @@ class ApiGetFleetspeakPendingMessagesHandlerTest(api_test_lib.ApiCallHandlerTest
   @mock.patch.object(fleetspeak_connector, "CONN")
   def testHandle_EmptySourceClientId(self, _):
     handler = client_plugin.ApiGetFleetspeakPendingMessagesHandler()
-    args = client_plugin.ApiGetFleetspeakPendingMessagesArgs(
-        client_id="C.1111111111111111")
+    args = client_pb2.ApiGetFleetspeakPendingMessagesArgs(
+        client_id="C.1111111111111111"
+    )
     fleetspeak_proto = admin_pb2.GetPendingMessagesResponse()
     text_format.Parse(
         """
@@ -770,27 +786,37 @@ class ApiGetFleetspeakPendingMessagesHandlerTest(api_test_lib.ApiCallHandlerTest
             client_id: ""
           }
         }
-        """, fleetspeak_proto)
-    expected_result = (
-        client_plugin.ApiGetFleetspeakPendingMessagesResult.FromTextFormat("""
+        """,
+        fleetspeak_proto,
+    )
+    expected_result = client_pb2.ApiGetFleetspeakPendingMessagesResult()
+    text_format.Parse(
+        """
         messages: {
           source: {
             service_name: "s1"
           }
         }
-        """))
+        """,
+        expected_result,
+    )
     with mock.patch.object(
         fleetspeak_utils,
         "GetFleetspeakPendingMessages",
-        return_value=fleetspeak_proto):
+        return_value=fleetspeak_proto,
+    ):
       result = handler.Handle(args)
+      print(result)
+      print("---------")
+      print(expected_result)
       self.assertEqual(result, expected_result)
 
   @mock.patch.object(fleetspeak_connector, "CONN")
   def testHandle_MissingSourceClientId(self, _):
     handler = client_plugin.ApiGetFleetspeakPendingMessagesHandler()
-    args = client_plugin.ApiGetFleetspeakPendingMessagesArgs(
-        client_id="C.1111111111111111")
+    args = client_pb2.ApiGetFleetspeakPendingMessagesArgs(
+        client_id="C.1111111111111111"
+    )
     fleetspeak_proto = admin_pb2.GetPendingMessagesResponse()
     text_format.Parse(
         """
@@ -799,19 +825,25 @@ class ApiGetFleetspeakPendingMessagesHandlerTest(api_test_lib.ApiCallHandlerTest
             service_name: "s1"
           }
         }
-        """, fleetspeak_proto)
-    expected_result = (
-        client_plugin.ApiGetFleetspeakPendingMessagesResult.FromTextFormat("""
+        """,
+        fleetspeak_proto,
+    )
+    expected_result = client_pb2.ApiGetFleetspeakPendingMessagesResult()
+    text_format.Parse(
+        """
         messages: {
           source: {
             service_name: "s1"
           }
         }
-        """))
+        """,
+        expected_result,
+    )
     with mock.patch.object(
         fleetspeak_utils,
         "GetFleetspeakPendingMessages",
-        return_value=fleetspeak_proto):
+        return_value=fleetspeak_proto,
+    ):
       result = handler.Handle(args)
       self.assertEqual(result, expected_result)
 

@@ -4,35 +4,32 @@ import logging
 import ntpath
 import os
 import pathlib
+import re
 import stat
-from typing import Iterable
-from typing import Iterator
-from typing import List
-from typing import Optional
-from typing import Sequence
 
 from grr_response_core.lib import artifact_utils
-from grr_response_core.lib import parsers
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib import utils
-from grr_response_core.lib.parsers import linux_release_parser
-from grr_response_core.lib.parsers import windows_registry_parser
 from grr_response_core.lib.rdfvalues import client as rdf_client
 from grr_response_core.lib.rdfvalues import client_action as rdf_client_action
 from grr_response_core.lib.rdfvalues import client_fs as rdf_client_fs
 from grr_response_core.lib.rdfvalues import file_finder as rdf_file_finder
 from grr_response_core.lib.rdfvalues import mig_artifacts
+from grr_response_core.lib.rdfvalues import mig_client
+from grr_response_core.lib.rdfvalues import mig_client_action
+from grr_response_core.lib.rdfvalues import mig_client_fs
 from grr_response_core.lib.rdfvalues import paths as rdf_paths
 from grr_response_core.lib.rdfvalues import protodict as rdf_protodict
 from grr_response_core.lib.rdfvalues import structs as rdf_structs
 from grr_response_proto import flows_pb2
+from grr_response_proto import jobs_pb2
+from grr_response_proto import knowledge_base_pb2
 from grr_response_server import artifact_registry
 from grr_response_server import data_store
-from grr_response_server import file_store
 from grr_response_server import flow_base
 from grr_response_server import flow_responses
 from grr_response_server import server_stubs
-from grr_response_server.databases import db
+from grr_response_server.flows.general import distro
 
 
 def GetKnowledgeBase(rdf_client_obj, allow_uninitialized=False):
@@ -71,20 +68,8 @@ class KnowledgeBaseInitializationArgs(rdf_structs.RDFProtoStruct):
 class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
   """Flow that atttempts to initialize the knowledge base.
 
-  This flow processes all artifacts specified by the
-  Artifacts.knowledge_base config. We determine what knowledgebase
-  attributes are required, collect them, and return a filled
+  We collect required knowledgebase attributes are required and return a filled
   knowledgebase.
-
-  We don't try to fulfill dependencies in the tree order, the
-  reasoning is that some artifacts may fail, and some artifacts
-  provide the same dependency.
-
-  Instead we take an iterative approach and keep requesting artifacts
-  until all dependencies have been met.  If there is more than one
-  artifact that provides a dependency we will collect them all as they
-  likely have different performance characteristics, e.g. accuracy and
-  client impact.
   """
 
   category = "/Collectors/"
@@ -101,10 +86,8 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
     if self.client_os == "Linux":
       if artifact_registry.REGISTRY.Exists("LinuxReleaseInfo"):
         self.CallFlow(
-            "ArtifactCollectorFlow",
-            artifact_list=["LinuxReleaseInfo"],
-            knowledge_base=self.state.knowledge_base,
-            next_state=self._ProcessLinuxReleaseInfo.__name__,
+            distro.CollectDistroInfo.__name__,
+            next_state=self._ProcessLinuxDistroInfo.__name__,
         )
       else:
         self.Log("`LinuxReleaseInfo` artifact not found, skipping...")
@@ -210,6 +193,48 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
           next_state=self._ProcessWindowsTimeZoneKeyName.__name__,
       )
 
+      args.pathspec.path = r"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment\TEMP"
+      self.CallClient(
+          server_stubs.GetFileStat,
+          args,
+          next_state=self._ProcessWindowsEnvTemp.__name__,
+      )
+
+      args.pathspec.path = r"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment\Path"
+      self.CallClient(
+          server_stubs.GetFileStat,
+          args,
+          next_state=self._ProcessWindowsEnvPath.__name__,
+      )
+
+      args.pathspec.path = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\ComSpec"
+      self.CallClient(
+          server_stubs.GetFileStat,
+          args,
+          next_state=self._ProcessWindowsEnvComSpec.__name__,
+      )
+
+      args.pathspec.path = r"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment\windir"
+      self.CallClient(
+          server_stubs.GetFileStat,
+          args,
+          next_state=self._ProcessWindowsEnvWindir.__name__,
+      )
+
+      args.pathspec.path = r"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\ProfileList\ProfilesDirectory"
+      self.CallClient(
+          server_stubs.GetFileStat,
+          args,
+          next_state=self._ProcessWindowsProfilesDirectory.__name__,
+      )
+
+      args.pathspec.path = r"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\ProfileList\AllUsersProfile"
+      self.CallClient(
+          server_stubs.GetFileStat,
+          args,
+          next_state=self._ProcessWindowsEnvAllUsersProfile.__name__,
+      )
+
       args = rdf_file_finder.FileFinderArgs()
       # TODO: There is no dedicated action for obtaining registry
       # values but `STAT` action of the file-finder will get it. This should be
@@ -226,45 +251,21 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
           next_state=self._ProcessWindowsProfiles.__name__,
       )
 
-  def _ProcessLinuxReleaseInfo(
+  def _ProcessLinuxDistroInfo(
       self,
-      responses: flow_responses.Responses[rdfvalue.RDFValue],
+      responses: flow_responses.Responses[distro.CollectDistroInfoResult],
   ) -> None:
     if not responses.success:
       self.Log("Failed to get Linux release information: %s", responses.status)
       return
 
-    knowledge_base = self.state.knowledge_base
-
-    pathspecs: list[rdf_paths.PathSpec] = []
-    files: list[file_store.BlobStream] = []
-
     for response in responses:
-      if not isinstance(response, rdf_client_fs.StatEntry):
-        self.Log("Unexpected response type: '%s'", type(response))
-        continue
-
-      path = db.ClientPath.FromPathSpec(self.client_id, response.pathspec)
-
-      pathspecs.append(response.pathspec)
-      files.append(file_store.OpenFile(path))
-
-    parser = linux_release_parser.LinuxReleaseParser()
-
-    for info in parser.ParseFiles(knowledge_base, pathspecs, files):
-      # The parser can sometimes yield an anomaly object.
-      if not (isinstance(info, dict) or isinstance(info, rdf_protodict.Dict)):
-        self.Log("Invalid release information: %s", info)
-        continue
-
-      if os_release := info.get("os_release"):
-        self.state.knowledge_base.os_release = os_release
-
-      if os_major_version := info.get("os_major_version"):
-        self.state.knowledge_base.os_major_version = os_major_version
-
-      if os_minor_version := info.get("os_minor_version"):
-        self.state.knowledge_base.os_minor_version = os_minor_version
+      if response.name:
+        self.state.knowledge_base.os_release = response.name
+      if response.version_major:
+        self.state.knowledge_base.os_major_version = response.version_major
+      if response.version_minor:
+        self.state.knowledge_base.os_minor_version = response.version_minor
 
   def _ProcessLinuxEnumerateUsers(
       self,
@@ -333,57 +334,14 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
     self.state.knowledge_base.environ_systemroot = system_root
     self.state.knowledge_base.environ_systemdrive = system_drive
 
-    # pylint: disable=line-too-long
-    # pyformat: disable
-    #
-    # TODO: The following values depend on `SystemRoot` so we have
-    # to schedule its collection after we have root. However, this requires
-    # intrinsic knowledge and is not much better than just hardcoding them.
-    # Instead, we should collect all variables as they are and then do the
-    # interpolation without hardcoding the dependencies.
-    #
-    # TODO: There is no dedicated action for obtaining registry
-    # values. The existing artifact collector uses `GetFileStat` action for
-    # this which is horrible.
-    args = rdf_client_action.GetFileStatRequest()
-    args.pathspec.pathtype = rdf_paths.PathSpec.PathType.REGISTRY
-
-    args.pathspec.path = r"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment\TEMP"
+    list_users_dir_args = jobs_pb2.ListDirRequest()
+    list_users_dir_args.pathspec.pathtype = jobs_pb2.PathSpec.PathType.OS
+    list_users_dir_args.pathspec.path = f"{system_drive}\\Users"
     self.CallClient(
-        server_stubs.GetFileStat,
-        args,
-        next_state=self._ProcessWindowsEnvTemp.__name__,
+        server_stubs.ListDirectory,
+        mig_client_action.ToRDFListDirRequest(list_users_dir_args),
+        next_state=self._ProcessWindowsListUsersDir.__name__,
     )
-
-    args.pathspec.path = r"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment\Path"
-    self.CallClient(
-        server_stubs.GetFileStat,
-        args,
-        next_state=self._ProcessWindowsEnvPath.__name__,
-    )
-
-    args.pathspec.path = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\ComSpec"
-    self.CallClient(
-        server_stubs.GetFileStat,
-        args,
-        next_state=self._ProcessWindowsEnvComSpec.__name__,
-    )
-
-    args.pathspec.path = r"HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment\windir"
-    self.CallClient(
-        server_stubs.GetFileStat,
-        args,
-        next_state=self._ProcessWindowsEnvWindir.__name__,
-    )
-
-    args.pathspec.path = r"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\ProfileList\ProfilesDirectory"
-    self.CallClient(
-        server_stubs.GetFileStat,
-        args,
-        next_state=self._ProcessWindowsProfilesDirectory.__name__,
-    )
-    # pylint: enable=line-too-long
-    # pyformat: enable
 
   def _ProcessWindowsEnvProgramFilesDir(
       self,
@@ -488,46 +446,9 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       message = f"Unexpected response type: {type(response)}"
       raise flow_base.FlowError(message)
 
-    program_data = response.registry_data.string
-    # TODO: We should not hardcode the dependency on `%SystemRoot%`
-    # and do an interpolation pass once all variables are there.
-    program_data = artifact_utils.ExpandWindowsEnvironmentVariables(
-        program_data,
-        self.state.knowledge_base,
+    self.state.knowledge_base.environ_programdata = (
+        response.registry_data.string
     )
-
-    self.state.knowledge_base.environ_programdata = program_data
-    # TODO: Remove once this knowledge base field is removed.
-    self.state.knowledge_base.environ_allusersappdata = program_data
-
-    # pylint: disable=line-too-long
-    # pyformat: disable
-    #
-    # Interestingly, it looks like there is no such value in the registry on
-    # Windows 10. But the original artifact uses this path and there are other
-    # websites stating that it should be there [1, 2] we try this anyway.
-    #
-    # According to Wikipedia [3] this value since Windows Vista is deprecated in
-    # favour of `%PRORGAMDATA%` so e fallback to that in case we cannot retrieve
-    # it.
-    #
-    # [1]: https://renenyffenegger.ch/notes/Windows/dirs/ProgramData/index
-    # [2]: https://winreg-kb.readthedocs.io/en/latest/sources/system-keys/Environment-variables.html#currentversion-profilelist-key
-    # [3]: https://en.wikipedia.org/wiki/Environment_variable#ALLUSERSPROFILE
-    #
-    # TODO: There is no dedicated action for obtaining registry
-    # values. The existing artifact collector uses `GetFileStat` action for
-    # this which is horrible.
-    args = rdf_client_action.GetFileStatRequest()
-    args.pathspec.pathtype = rdf_paths.PathSpec.PathType.REGISTRY
-    args.pathspec.path = r"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\ProfileList\AllUsersProfile"
-    self.CallClient(
-        server_stubs.GetFileStat,
-        args,
-        next_state=self._ProcessWindowsEnvAllUsersProfile.__name__,
-    )
-    # pylint: enable=line-too-long
-    # pyformat: enable
 
   def _ProcessWindowsEnvDriverData(
       self,
@@ -653,7 +574,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
 
     time_zone_key_name = response.registry_data.string
     try:
-      time_zone = windows_registry_parser.ZONE_LIST[time_zone_key_name]
+      time_zone = _WINDOWS_TIME_ZONE_MAP[time_zone_key_name]
     except KeyError:
       self.Log("Failed to parse time zone key name: %r", time_zone_key_name)
       # We set the time zone as "unknown" with the raw value in case the call
@@ -686,7 +607,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
 
     time_zone_standard_name = response.registry_data.string
     try:
-      time_zone = windows_registry_parser.ZONE_LIST[time_zone_standard_name]
+      time_zone = _WINDOWS_TIME_ZONE_MAP[time_zone_standard_name]
     except KeyError:
       self.Log(
           "Failed to parse time zone standard name: %r",
@@ -719,15 +640,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       message = f"Unexpected response type: {type(response)}"
       raise flow_base.FlowError(message)
 
-    temp = response.registry_data.string
-    # TODO: We should not hardcode the dependency of `TEMP` on
-    # `SystemRoot` and do an interpolation pass once all variables are there.
-    temp = artifact_utils.ExpandWindowsEnvironmentVariables(
-        temp,
-        self.state.knowledge_base,
-    )
-
-    self.state.knowledge_base.environ_temp = temp
+    self.state.knowledge_base.environ_temp = response.registry_data.string
 
   def _ProcessWindowsEnvPath(
       self,
@@ -746,15 +659,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       message = f"Unexpected response type: {type(response)}"
       raise flow_base.FlowError(message)
 
-    path = response.registry_data.string
-    # TODO: We should not hardcode the dependency of `Path` on
-    # `SystemRoot` and do an interpolation pass once all variables are there.
-    path = artifact_utils.ExpandWindowsEnvironmentVariables(
-        path,
-        self.state.knowledge_base,
-    )
-
-    self.state.knowledge_base.environ_path = path
+    self.state.knowledge_base.environ_path = response.registry_data.string
 
   def _ProcessWindowsEnvComSpec(
       self,
@@ -773,15 +678,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       message = f"Unexpected response type: {type(response)}"
       raise flow_base.FlowError(message)
 
-    com_spec = response.registry_data.string
-    # TODO: We should not hardcode the dependency of `ComSpec` on
-    # `SystemRoot` and do an interpolation pass once all variables are there.
-    com_spec = artifact_utils.ExpandWindowsEnvironmentVariables(
-        com_spec,
-        self.state.knowledge_base,
-    )
-
-    self.state.knowledge_base.environ_comspec = com_spec
+    self.state.knowledge_base.environ_comspec = response.registry_data.string
 
   def _ProcessWindowsEnvWindir(
       self,
@@ -800,15 +697,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       message = f"Unexpected response type: {type(response)}"
       raise flow_base.FlowError(message)
 
-    windir = response.registry_data.string
-    # TODO: We should not hardcode the dependency of `windir` on
-    # `SystemRoot` and do an interpolation pass once all variables are there.
-    windir = artifact_utils.ExpandWindowsEnvironmentVariables(
-        windir,
-        self.state.knowledge_base,
-    )
-
-    self.state.knowledge_base.environ_windir = windir
+    self.state.knowledge_base.environ_windir = response.registry_data.string
 
   def _ProcessWindowsProfilesDirectory(
       self,
@@ -827,47 +716,34 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       message = f"Unexpected response type: {type(response)}"
       raise flow_base.FlowError(message)
 
-    profiles_directory = response.registry_data.string
-    # TODO: We should not hardcode the dependency on `SystemDrive`
-    # and do an interpolation pass once all variables are there.
-    profiles_directory = artifact_utils.ExpandWindowsEnvironmentVariables(
-        profiles_directory,
-        self.state.knowledge_base,
+    self.state.knowledge_base.environ_profilesdirectory = (
+        response.registry_data.string
     )
-
-    self.state.knowledge_base.environ_profilesdirectory = profiles_directory
 
   def _ProcessWindowsEnvAllUsersProfile(
       self,
       responses: flow_responses.Responses[rdfvalue.RDFValue],
   ) -> None:
-    if responses.success:
-      if len(responses) != 1:
-        message = f"Unexpected number of responses: {len(responses)}"
-        raise flow_base.FlowError(message)
-
-      response = responses.First()
-      if not isinstance(response, rdf_client_fs.StatEntry):
-        message = f"Unexpected response type: {type(response)}"
-        raise flow_base.FlowError(message)
-
-      allusersprofile = response.registry_data.string
-    else:
+    if not responses.success:
       # Since Windows Vista `%PROGRAMDATA%` superseded `%ALLUSERSPROFILE%` [1],
-      # so we fall back to that in case we cannot obtain it (which is expected
-      # on most modern machines and thus we don't even log an error).
+      # so we actually expect this call to fail most of the time. Thus, we don't
+      # log anything or raise any errors.
       #
       # [1]: https://en.wikipedia.org/wiki/Environment_variable#ALLUSERSPROFILE
-      allusersprofile = self.state.knowledge_base.environ_programdata
+      return
 
-    # TODO: We should not hardcode dependency on `%ProgramData%`
-    # and do an interpolation pass once all variables are there.
-    allusersprofile = artifact_utils.ExpandWindowsEnvironmentVariables(
-        allusersprofile,
-        self.state.knowledge_base,
+    if len(responses) != 1:
+      message = f"Unexpected number of responses: {len(responses)}"
+      raise flow_base.FlowError(message)
+
+    response = responses.First()
+    if not isinstance(response, rdf_client_fs.StatEntry):
+      message = f"Unexpected response type: {type(response)}"
+      raise flow_base.FlowError(message)
+
+    self.state.knowledge_base.environ_allusersprofile = (
+        response.registry_data.string
     )
-
-    self.state.knowledge_base.environ_allusersprofile = allusersprofile
 
   def _ProcessWindowsProfiles(
       self,
@@ -884,7 +760,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
       sid = ntpath.basename(ntpath.dirname(response.stat_entry.pathspec.path))
       home = response.stat_entry.registry_data.string
 
-      if not windows_registry_parser.SID_RE.match(sid):
+      if not _WINDOWS_SID_REGEX.match(sid):
         # There are some system profiles that do not match, so we don't log any
         # errors and just silently continue.
         continue
@@ -975,7 +851,7 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
         continue
 
       sid = parts[hive_index + 1]
-      if not windows_registry_parser.SID_RE.match(sid):
+      if not _WINDOWS_SID_REGEX.match(sid):
         self.Log("Unexpected registry SID for %r", path)
         continue
 
@@ -1052,9 +928,59 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
 
       user.userdomain = domain
 
+  def _ProcessWindowsListUsersDir(
+      self,
+      responses: flow_responses.Responses[rdfvalue.RDFValue],
+  ) -> None:
+    if not responses.success:
+      self.Log("Failed to list Windows `Users` directory: %s", responses.status)
+      return
+
+    for response in responses:
+      if not isinstance(response, rdf_client_fs.StatEntry):
+        raise flow_base.FlowError(f"Unexpected response type: {type(response)}")
+
+      response = mig_client_fs.ToProtoStatEntry(response)
+
+      # There can be random files there as well. We are interested exclusively
+      # in folders as file does not indicate user profile.
+      if not stat.S_ISDIR(response.st_mode):
+        continue
+
+      # TODO: Remove once the `ListDirectory` action is fixed not
+      # to yield results with leading slashes on Windows.
+      response.pathspec.path = response.pathspec.path.removeprefix("/")
+
+      path = pathlib.PureWindowsPath(response.pathspec.path)
+
+      # There are certain profiles there that are not real "users" active on the
+      # machine and so we should not report them as such.
+      if path.name.upper() in [
+          "ADMINISTRATOR",
+          "ALL USERS",
+          "DEFAULT",
+          "DEFAULT USER",
+          "DEFAULTUSER0",
+          "PUBLIC",
+      ]:
+        continue
+
+      user = knowledge_base_pb2.User()
+      user.username = path.name
+      user.homedir = str(path)
+
+      self.state.knowledge_base.MergeOrAddUser(mig_client.ToRDFUser(user))
+
   def End(self, responses):
     """Finish up."""
     del responses
+
+    if self.client_os == "Windows":
+      self.state.knowledge_base = mig_client.ToRDFKnowledgeBase(
+          artifact_utils.ExpandKnowledgebaseWindowsEnvVars(
+              mig_client.ToProtoKnowledgeBase(self.state.knowledge_base),
+          ),
+      )
 
     # TODO: `%LOCALAPPDATA%` is a very often used variable that we
     # potentially not collect due to limitations of the Windows registry. For
@@ -1097,194 +1023,6 @@ class KnowledgeBaseInitializationFlow(flow_base.FlowBase):
           state_kb.os_minor_version = int(version[1])
       except ValueError:
         pass
-
-
-class ParseResults(object):
-  """A class representing results of parsing flow responses."""
-
-  def __init__(self):
-    self._responses: List[rdfvalue.RDFValue] = []
-    self._errors: List[parsers.ParseError] = []
-
-  def AddResponses(self, responses: Iterator[rdfvalue.RDFValue]) -> None:
-    self._responses.extend(responses)
-
-  def AddError(self, error: parsers.ParseError) -> None:
-    self._errors.append(error)
-
-  def Responses(self) -> Iterator[rdfvalue.RDFValue]:
-    return iter(self._responses)
-
-  def Errors(self) -> Iterator[parsers.ParseError]:
-    return iter(self._errors)
-
-
-class ParserApplicator(object):
-  """An utility class for applying many parsers to responses."""
-
-  def __init__(
-      self,
-      factory: parsers.ArtifactParserFactory,
-      client_id: str,
-      knowledge_base: rdf_client.KnowledgeBase,
-      timestamp: Optional[rdfvalue.RDFDatetime] = None,
-  ):
-    """Initializes the applicator.
-
-    Args:
-      factory: A parser factory that produces parsers to apply.
-      client_id: An identifier of the client for which the responses were
-        collected.
-      knowledge_base: A knowledge base of the client from which the responses
-        were collected.
-      timestamp: An optional timestamp at which parsers should interpret the
-        results. For example, parsers that depend on files, will receive content
-        of files as it was at the given timestamp.
-    """
-    self._factory = factory
-    self._client_id = client_id
-    self._knowledge_base = knowledge_base
-    self._timestamp = timestamp
-    self._results = ParseResults()
-
-  def Apply(self, responses: Sequence[rdfvalue.RDFValue]):
-    """Applies all known parsers to the specified responses.
-
-    Args:
-      responses: A sequence of responses to apply the parsers to.
-    """
-    for response in responses:
-      self._ApplySingleResponse(response)
-
-    self._ApplyMultiResponse(responses)
-
-    # File parsers accept only stat responses. It might be possible that an
-    # artifact declares multiple sources and has multiple parsers attached (each
-    # for different kind of source). Thus, artifacts are not "well typed" now
-    # we must supply parsers only with something they support.
-    stat_responses: List[rdf_client_fs.StatEntry] = []
-    for response in responses:
-      if isinstance(response, rdf_client_fs.StatEntry):
-        stat_responses.append(response)
-
-    has_single_file_parsers = self._factory.HasSingleFileParsers()
-    has_multi_file_parsers = self._factory.HasMultiFileParsers()
-
-    if has_single_file_parsers or has_multi_file_parsers:
-      pathspecs = [response.pathspec for response in stat_responses]
-      # It might be also the case that artifact has both regular response parser
-      # and file parser attached and sources that don't collect files but yield
-      # stat entries.
-      #
-      # TODO(hanuszczak): This is a quick workaround that works for now, but
-      # can lead to spurious file being parsed if the file was collected in the
-      # past and now only a stat entry response came. A proper solution would be
-      # to tag responses with artifact source and then make parsers define what
-      # sources they support.
-      pathspecs = list(filter(self._HasFile, pathspecs))
-      filedescs = [self._OpenFile(pathspec) for pathspec in pathspecs]
-
-      for pathspec, filedesc in zip(pathspecs, filedescs):
-        self._ApplySingleFile(pathspec, filedesc)
-
-      self._ApplyMultiFile(pathspecs, filedescs)
-
-  def Responses(self) -> Iterator[rdfvalue.RDFValue]:
-    """Returns an iterator over all parsed responses."""
-    yield from self._results.Responses()
-
-  def Errors(self) -> Iterator[parsers.ParseError]:
-    """Returns an iterator over errors that occurred during parsing."""
-    yield from self._results.Errors()
-
-  def _ApplySingleResponse(
-      self,
-      response: rdfvalue.RDFValue,
-  ) -> None:
-    """Applies all single-response parsers to the given response."""
-    for parser in self._factory.SingleResponseParsers():
-      try:
-        results = parser.ParseResponse(self._knowledge_base, response)
-        self._results.AddResponses(results)
-      except parsers.ParseError as error:
-        self._results.AddError(error)
-
-  def _ApplyMultiResponse(
-      self,
-      responses: Iterable[rdfvalue.RDFValue],
-  ) -> None:
-    """Applies all multi-response parsers to the given responses."""
-    for parser in self._factory.MultiResponseParsers():
-      try:
-        results = parser.ParseResponses(self._knowledge_base, responses)
-        self._results.AddResponses(results)
-      except parsers.ParseError as error:
-        self._results.AddError(error)
-
-  def _ApplySingleFile(
-      self,
-      pathspec: rdf_paths.PathSpec,
-      filedesc: file_store.BlobStream,
-  ) -> None:
-    """Applies all single-file parsers to the given file."""
-    for parser in self._factory.SingleFileParsers():
-      try:
-        results = parser.ParseFile(self._knowledge_base, pathspec, filedesc)
-        self._results.AddResponses(results)
-      except parsers.ParseError as error:
-        self._results.AddError(error)
-
-  def _ApplyMultiFile(
-      self,
-      pathspecs: Iterable[rdf_paths.PathSpec],
-      filedescs: Iterable[file_store.BlobStream],
-  ) -> None:
-    """Applies all multi-file parsers to the given file."""
-    for parser in self._factory.MultiFileParsers():
-      try:
-        results = parser.ParseFiles(self._knowledge_base, pathspecs, filedescs)
-        self._results.AddResponses(results)
-      except parsers.ParseError as error:
-        self._results.AddError(error)
-
-  def _HasFile(self, pathspec: rdf_paths.PathSpec) -> bool:
-    """Checks whether any file for the given pathspec was ever collected."""
-    client_path = db.ClientPath.FromPathSpec(self._client_id, pathspec)
-    return file_store.GetLastCollectionPathInfo(client_path) is not None
-
-  def _OpenFile(self, pathspec: rdf_paths.PathSpec) -> file_store.BlobStream:
-    # TODO(amoser): This is not super efficient, AFF4 provided an api to open
-    # all pathspecs at the same time, investigate if optimizing this is worth
-    # it.
-    client_path = db.ClientPath.FromPathSpec(self._client_id, pathspec)
-    return file_store.OpenFile(client_path, max_timestamp=self._timestamp)
-
-
-def ApplyParsersToResponses(parser_factory, responses, flow_obj):
-  """Parse responses with applicable parsers.
-
-  Args:
-    parser_factory: A parser factory for specific artifact.
-    responses: A list of responses from the client.
-    flow_obj: An artifact collection flow.
-
-  Returns:
-    A list of (possibly parsed) responses.
-  """
-  if not parser_factory.HasParsers():
-    # If we don't have any parsers, we expect to use the unparsed responses.
-    return responses
-
-  knowledge_base = flow_obj.state.knowledge_base
-  client_id = flow_obj.client_id
-
-  applicator = ParserApplicator(parser_factory, client_id, knowledge_base)
-  applicator.Apply(responses)
-
-  for error in applicator.Errors():
-    flow_obj.Log("Error encountered when parsing responses: %s", error)
-
-  return list(applicator.Responses())
 
 
 def UploadArtifactYamlFile(file_content,
@@ -1333,3 +1071,203 @@ def LoadArtifactsOnce():
   Datastore gets loaded second so it can override Artifacts in the files.
   """
   artifact_registry.REGISTRY.AddDefaultSources()
+
+
+_WINDOWS_SID_REGEX = re.compile(r"^S-\d-\d+-(\d+-){1,14}\d+$")
+
+
+# Pre-built from the following Windows registry key:
+# `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Time Zones\`
+#
+# Note that these may not be consistent across Windows versions so may need
+# adjustment in the future.
+_WINDOWS_TIME_ZONE_MAP: dict[str, str] = {
+    "IndiaStandardTime": "Asia/Kolkata",
+    "EasternStandardTime": "EST5EDT",
+    "EasternDaylightTime": "EST5EDT",
+    "MountainStandardTime": "MST7MDT",
+    "MountainDaylightTime": "MST7MDT",
+    "PacificStandardTime": "PST8PDT",
+    "PacificDaylightTime": "PST8PDT",
+    "CentralStandardTime": "CST6CDT",
+    "CentralDaylightTime": "CST6CDT",
+    "SamoaStandardTime": "US/Samoa",
+    "HawaiianStandardTime": "US/Hawaii",
+    "AlaskanStandardTime": "US/Alaska",
+    "MexicoStandardTime2": "MST7MDT",
+    "USMountainStandardTime": "MST7MDT",
+    "CanadaCentralStandardTime": "CST6CDT",
+    "MexicoStandardTime": "CST6CDT",
+    "CentralAmericaStandardTime": "CST6CDT",
+    "USEasternStandardTime": "EST5EDT",
+    "SAPacificStandardTime": "EST5EDT",
+    "MalayPeninsulaStandardTime": "Asia/Kuching",
+    "PacificSAStandardTime": "Canada/Atlantic",
+    "AtlanticStandardTime": "Canada/Atlantic",
+    "SAWesternStandardTime": "Canada/Atlantic",
+    "NewfoundlandStandardTime": "Canada/Newfoundland",
+    "AzoresStandardTime": "Atlantic/Azores",
+    "CapeVerdeStandardTime": "Atlantic/Azores",
+    "GMTStandardTime": "GMT",
+    "GreenwichStandardTime": "GMT",
+    "W.CentralAfricaStandardTime": "Europe/Belgrade",
+    "W.EuropeStandardTime": "Europe/Belgrade",
+    "CentralEuropeStandardTime": "Europe/Belgrade",
+    "RomanceStandardTime": "Europe/Belgrade",
+    "CentralEuropeanStandardTime": "Europe/Belgrade",
+    "E.EuropeStandardTime": "Egypt",
+    "SouthAfricaStandardTime": "Egypt",
+    "IsraelStandardTime": "Egypt",
+    "EgyptStandardTime": "Egypt",
+    "NorthAsiaEastStandardTime": "Asia/Bangkok",
+    "SingaporeStandardTime": "Asia/Bangkok",
+    "ChinaStandardTime": "Asia/Bangkok",
+    "W.AustraliaStandardTime": "Australia/Perth",
+    "TaipeiStandardTime": "Asia/Bangkok",
+    "TokyoStandardTime": "Asia/Tokyo",
+    "KoreaStandardTime": "Asia/Seoul",
+    "@tzres.dll,-10": "Atlantic/Azores",
+    "@tzres.dll,-11": "Atlantic/Azores",
+    "@tzres.dll,-12": "Atlantic/Azores",
+    "@tzres.dll,-20": "Atlantic/Cape_Verde",
+    "@tzres.dll,-21": "Atlantic/Cape_Verde",
+    "@tzres.dll,-22": "Atlantic/Cape_Verde",
+    "@tzres.dll,-40": "Brazil/East",
+    "@tzres.dll,-41": "Brazil/East",
+    "@tzres.dll,-42": "Brazil/East",
+    "@tzres.dll,-70": "Canada/Newfoundland",
+    "@tzres.dll,-71": "Canada/Newfoundland",
+    "@tzres.dll,-72": "Canada/Newfoundland",
+    "@tzres.dll,-80": "Canada/Atlantic",
+    "@tzres.dll,-81": "Canada/Atlantic",
+    "@tzres.dll,-82": "Canada/Atlantic",
+    "@tzres.dll,-104": "America/Cuiaba",
+    "@tzres.dll,-105": "America/Cuiaba",
+    "@tzres.dll,-110": "EST5EDT",
+    "@tzres.dll,-111": "EST5EDT",
+    "@tzres.dll,-112": "EST5EDT",
+    "@tzres.dll,-120": "EST5EDT",
+    "@tzres.dll,-121": "EST5EDT",
+    "@tzres.dll,-122": "EST5EDT",
+    "@tzres.dll,-130": "EST5EDT",
+    "@tzres.dll,-131": "EST5EDT",
+    "@tzres.dll,-132": "EST5EDT",
+    "@tzres.dll,-140": "CST6CDT",
+    "@tzres.dll,-141": "CST6CDT",
+    "@tzres.dll,-142": "CST6CDT",
+    "@tzres.dll,-150": "America/Guatemala",
+    "@tzres.dll,-151": "America/Guatemala",
+    "@tzres.dll,-152": "America/Guatemala",
+    "@tzres.dll,-160": "CST6CDT",
+    "@tzres.dll,-161": "CST6CDT",
+    "@tzres.dll,-162": "CST6CDT",
+    "@tzres.dll,-170": "America/Mexico_City",
+    "@tzres.dll,-171": "America/Mexico_City",
+    "@tzres.dll,-172": "America/Mexico_City",
+    "@tzres.dll,-180": "MST7MDT",
+    "@tzres.dll,-181": "MST7MDT",
+    "@tzres.dll,-182": "MST7MDT",
+    "@tzres.dll,-190": "MST7MDT",
+    "@tzres.dll,-191": "MST7MDT",
+    "@tzres.dll,-192": "MST7MDT",
+    "@tzres.dll,-200": "MST7MDT",
+    "@tzres.dll,-201": "MST7MDT",
+    "@tzres.dll,-202": "MST7MDT",
+    "@tzres.dll,-210": "PST8PDT",
+    "@tzres.dll,-211": "PST8PDT",
+    "@tzres.dll,-212": "PST8PDT",
+    "@tzres.dll,-220": "US/Alaska",
+    "@tzres.dll,-221": "US/Alaska",
+    "@tzres.dll,-222": "US/Alaska",
+    "@tzres.dll,-230": "US/Hawaii",
+    "@tzres.dll,-231": "US/Hawaii",
+    "@tzres.dll,-232": "US/Hawaii",
+    "@tzres.dll,-260": "GMT",
+    "@tzres.dll,-261": "GMT",
+    "@tzres.dll,-262": "GMT",
+    "@tzres.dll,-271": "UTC",
+    "@tzres.dll,-272": "UTC",
+    "@tzres.dll,-280": "Europe/Budapest",
+    "@tzres.dll,-281": "Europe/Budapest",
+    "@tzres.dll,-282": "Europe/Budapest",
+    "@tzres.dll,-290": "Europe/Warsaw",
+    "@tzres.dll,-291": "Europe/Warsaw",
+    "@tzres.dll,-292": "Europe/Warsaw",
+    "@tzres.dll,-331": "Europe/Nicosia",
+    "@tzres.dll,-332": "Europe/Nicosia",
+    "@tzres.dll,-340": "Africa/Cairo",
+    "@tzres.dll,-341": "Africa/Cairo",
+    "@tzres.dll,-342": "Africa/Cairo",
+    "@tzres.dll,-350": "Europe/Sofia",
+    "@tzres.dll,-351": "Europe/Sofia",
+    "@tzres.dll,-352": "Europe/Sofia",
+    "@tzres.dll,-365": "Egypt",
+    "@tzres.dll,-390": "Asia/Kuwait",
+    "@tzres.dll,-391": "Asia/Kuwait",
+    "@tzres.dll,-392": "Asia/Kuwait",
+    "@tzres.dll,-400": "Asia/Baghdad",
+    "@tzres.dll,-401": "Asia/Baghdad",
+    "@tzres.dll,-402": "Asia/Baghdad",
+    "@tzres.dll,-410": "Africa/Nairobi",
+    "@tzres.dll,-411": "Africa/Nairobi",
+    "@tzres.dll,-412": "Africa/Nairobi",
+    "@tzres.dll,-434": "Asia/Tbilisi",
+    "@tzres.dll,-435": "Asia/Tbilisi",
+    "@tzres.dll,-440": "Asia/Muscat",
+    "@tzres.dll,-441": "Asia/Muscat",
+    "@tzres.dll,-442": "Asia/Muscat",
+    "@tzres.dll,-447": "Asia/Baku",
+    "@tzres.dll,-448": "Asia/Baku",
+    "@tzres.dll,-449": "Asia/Baku",
+    "@tzres.dll,-450": "Asia/Yerevan",
+    "@tzres.dll,-451": "Asia/Yerevan",
+    "@tzres.dll,-452": "Asia/Yerevan",
+    "@tzres.dll,-460": "Asia/Kabul",
+    "@tzres.dll,-461": "Asia/Kabul",
+    "@tzres.dll,-462": "Asia/Kabul",
+    "@tzres.dll,-471": "Asia/Yekaterinburg",
+    "@tzres.dll,-472": "Asia/Yekaterinburg",
+    "@tzres.dll,-511": "Asia/Aqtau",
+    "@tzres.dll,-512": "Asia/Aqtau",
+    "@tzres.dll,-570": "Asia/Chongqing",
+    "@tzres.dll,-571": "Asia/Chongqing",
+    "@tzres.dll,-572": "Asia/Chongqing",
+    "@tzres.dll,-650": "Australia/Darwin",
+    "@tzres.dll,-651": "Australia/Darwin",
+    "@tzres.dll,-652": "Australia/Darwin",
+    "@tzres.dll,-660": "Australia/Adelaide",
+    "@tzres.dll,-661": "Australia/Adelaide",
+    "@tzres.dll,-662": "Australia/Adelaide",
+    "@tzres.dll,-670": "Australia/Sydney",
+    "@tzres.dll,-671": "Australia/Sydney",
+    "@tzres.dll,-672": "Australia/Sydney",
+    "@tzres.dll,-680": "Australia/Brisbane",
+    "@tzres.dll,-681": "Australia/Brisbane",
+    "@tzres.dll,-682": "Australia/Brisbane",
+    "@tzres.dll,-721": "Pacific/Port_Moresby",
+    "@tzres.dll,-722": "Pacific/Port_Moresby",
+    "@tzres.dll,-731": "Pacific/Fiji",
+    "@tzres.dll,-732": "Pacific/Fiji",
+    "@tzres.dll,-840": "America/Argentina/Buenos_Aires",
+    "@tzres.dll,-841": "America/Argentina/Buenos_Aires",
+    "@tzres.dll,-842": "America/Argentina/Buenos_Aires",
+    "@tzres.dll,-880": "UTC",
+    "@tzres.dll,-930": "UTC",
+    "@tzres.dll,-931": "UTC",
+    "@tzres.dll,-932": "UTC",
+    "@tzres.dll,-1010": "Asia/Aqtau",
+    "@tzres.dll,-1020": "Asia/Dhaka",
+    "@tzres.dll,-1021": "Asia/Dhaka",
+    "@tzres.dll,-1022": "Asia/Dhaka",
+    "@tzres.dll,-1070": "Asia/Tbilisi",
+    "@tzres.dll,-1120": "America/Cuiaba",
+    "@tzres.dll,-1140": "Pacific/Fiji",
+    "@tzres.dll,-1460": "Pacific/Port_Moresby",
+    "@tzres.dll,-1530": "Asia/Yekaterinburg",
+    "@tzres.dll,-1630": "Europe/Nicosia",
+    "@tzres.dll,-1660": "America/Bahia",
+    "@tzres.dll,-1661": "America/Bahia",
+    "@tzres.dll,-1662": "America/Bahia",
+    "Central Standard Time": "CST6CDT",
+    "Pacific Standard Time": "PST8PDT",
+}

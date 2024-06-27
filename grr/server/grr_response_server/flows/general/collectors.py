@@ -6,9 +6,7 @@ from typing import Optional, Sequence, Text
 
 from grr_response_core import config
 from grr_response_core.lib import artifact_utils
-from grr_response_core.lib import parsers
 from grr_response_core.lib import rdfvalue
-from grr_response_core.lib.parsers import windows_persistence
 from grr_response_core.lib.rdfvalues import anomaly as rdf_anomaly
 from grr_response_core.lib.rdfvalues import artifacts as rdf_artifacts
 from grr_response_core.lib.rdfvalues import client as rdf_client
@@ -19,6 +17,7 @@ from grr_response_core.lib.rdfvalues import mig_client
 from grr_response_core.lib.rdfvalues import paths as rdf_paths
 from grr_response_core.lib.rdfvalues import structs as rdf_structs
 from grr_response_core.lib.util import collection
+from grr_response_core.path_detection import windows as path_detection_windows
 from grr_response_proto import flows_pb2
 from grr_response_server import action_registry
 from grr_response_server import artifact
@@ -26,7 +25,6 @@ from grr_response_server import artifact_registry
 from grr_response_server import data_store
 from grr_response_server import flow_base
 from grr_response_server import server_stubs
-from grr_response_server.flows.general import artifact_fallbacks
 from grr_response_server.flows.general import file_finder
 from grr_response_server.flows.general import filesystem
 from grr_response_server.flows.general import transfer
@@ -111,7 +109,6 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
     """For each artifact, create subflows for each collector."""
     self.state.artifacts_failed = []
     self.state.artifacts_skipped_due_to_condition = []
-    self.state.called_fallbacks = set()
     self.state.failed_count = 0
     self.state.knowledge_base = self.args.knowledge_base
     self.state.response_count = 0
@@ -135,10 +132,9 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
       except artifact_utils.KnowledgeBaseUninitializedError:
         # If no-one has ever initialized the knowledge base, we should do so
         # now.
-        if not self._AreArtifactsKnowledgeBaseArtifacts():
-          # String due to dependency loop with discover.py.
-          self.CallFlow("Interrogate", next_state=self.StartCollection.__name__)
-          return
+        # String due to dependency loop with discover.py.
+        self.CallFlow("Interrogate", next_state=self.StartCollection.__name__)
+        return
 
     # In all other cases start the collection state.
     self.CallState(next_state=self.StartCollection.__name__)
@@ -208,10 +204,7 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
       self.current_artifact_name = artifact_name
       if type_name == source_type.COMMAND:
         self.RunCommand(source)
-      # TODO(hanuszczak): `DIRECTORY` is deprecated [1], it should be removed.
-      #
-      # [1]: https://github.com/ForensicArtifacts/artifacts/pull/475
-      elif type_name == source_type.DIRECTORY or type_name == source_type.PATH:
+      elif type_name == source_type.PATH:
         self.GetPaths(
             source,
             _GetPathType(self.args, self.client_os),
@@ -226,12 +219,6 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
             rdf_file_finder.FileFinderAction.Download(
                 max_size=self.args.max_file_size
             ),
-        )
-      elif type_name == source_type.GREP:
-        self.Grep(
-            source,
-            _GetPathType(self.args, self.client_os),
-            _GetImplementationType(self.args),
         )
       elif type_name == source_type.REGISTRY_KEY:
         self.GetRegistryKey(source)
@@ -259,13 +246,6 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
           artifact_name,
           self.client_id,
       )
-
-  def _AreArtifactsKnowledgeBaseArtifacts(self):
-    knowledgebase_list = config.CONFIG["Artifacts.knowledge_base"]
-    for artifact_name in self.args.artifact_list:
-      if artifact_name not in knowledgebase_list:
-        return False
-    return True
 
   def GetPaths(self, source, path_type, implementation_type, action):
     """Get a set of files."""
@@ -323,60 +303,6 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
         regex_combined = b"(%s)" % regex
     return regex_combined
 
-  def Grep(self, source, pathtype, implementation_type):
-    """Grep files in paths for any matches to content_regex_list.
-
-    When multiple regexes are supplied, combine
-    them into a single regex as an OR match so that we check all regexes at
-    once.
-
-    Args:
-      source: artifact source
-      pathtype: pathspec path typed
-      implementation_type: Pathspec implementation type to use.
-    """
-    path_list = self.InterpolateList(source.attributes.get("paths", []))
-
-    # `content_regex_list` elements should be binary strings, but forcing
-    # artifact creators to use verbose YAML syntax for binary literals would
-    # be cruel. Therefore, we allow both kind of strings and we convert to bytes
-    # if required.
-    content_regex_list = []
-    for content_regex in source.attributes.get("content_regex_list", []):
-      if isinstance(content_regex, Text):
-        content_regex = content_regex.encode("utf-8")
-      content_regex_list.append(content_regex)
-
-    content_regex_list = self.InterpolateList(content_regex_list)
-
-    regex_condition = rdf_file_finder.FileFinderContentsRegexMatchCondition(
-        regex=self._CombineRegex(content_regex_list),
-        bytes_before=0,
-        bytes_after=0,
-        mode="ALL_HITS",
-    )
-
-    file_finder_condition = rdf_file_finder.FileFinderCondition(
-        condition_type=(
-            rdf_file_finder.FileFinderCondition.Type.CONTENTS_REGEX_MATCH
-        ),
-        contents_regex_match=regex_condition,
-    )
-
-    self.CallFlow(
-        file_finder.FileFinder.__name__,
-        paths=path_list,
-        conditions=[file_finder_condition],
-        action=rdf_file_finder.FileFinderAction(),
-        pathtype=pathtype,
-        implementation_type=implementation_type,
-        request_data={
-            "artifact_name": self.current_artifact_name,
-            "source": source.ToPrimitiveDict(),
-        },
-        next_state=self.ProcessCollected.__name__,
-    )
-
   def GetRegistryKey(self, source):
     self.CallFlow(
         filesystem.Glob.__name__,
@@ -409,17 +335,21 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
         # we do here.
         path = kvdict["key"]
 
-      try:
-        expanded_paths = artifact_utils.InterpolateKbAttributes(
-            path, self.state.knowledge_base
-        )
-      except artifact_utils.KbInterpolationMissingAttributesError as error:
-        logging.error(str(error))
-        if not self.args.ignore_interpolation_errors:
-          raise
-        else:
-          expanded_paths = []
-      new_paths.update(expanded_paths)
+      interpolation = artifact_utils.KnowledgeBaseInterpolation(
+          pattern=path,
+          kb=mig_client.ToProtoKnowledgeBase(self.state.knowledge_base),
+      )
+
+      for log in interpolation.logs:
+        self.Log("knowledgebase registry path interpolation: %s", log)
+
+      if (
+          not interpolation.results
+          and not self.args.ignore_interpolation_errors
+      ):
+        raise flow_base.FlowError(f"Registry path {path!r} interpolation error")
+
+      new_paths.update(interpolation.results)
 
     if has_glob:
       self.CallFlow(
@@ -456,7 +386,6 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
         ArtifactCollectorFlow.__name__,
         artifact_list=artifact_list,
         use_raw_filesystem_access=self.args.use_raw_filesystem_access,
-        apply_parsers=self.args.apply_parsers,
         implementation_type=self.args.implementation_type,
         max_file_size=self.args.max_file_size,
         ignore_interpolation_errors=self.args.ignore_interpolation_errors,
@@ -590,15 +519,21 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
     if knowledgebase is None:
       knowledgebase = self.state.knowledge_base
 
-    try:
-      return artifact_utils.InterpolateKbAttributes(pattern, knowledgebase)
-    except artifact_utils.KbInterpolationMissingAttributesError as error:
+    interpolation = artifact_utils.KnowledgeBaseInterpolation(
+        pattern=pattern,
+        kb=mig_client.ToProtoKnowledgeBase(knowledgebase),
+    )
+
+    for log in interpolation.logs:
+      self.Log("knowledgebase interpolation: %s", log)
+
+    if not interpolation.results:
       if self.args.old_client_snapshot_fallback:
         return []
-      if self.args.ignore_interpolation_errors:
-        logging.error(str(error))
-        return []
-      raise
+      if not self.args.ignore_interpolation_errors:
+        raise flow_base.FlowError(f"{pattern} interpolation error")
+
+    return interpolation.results
 
   def RunGrrClientAction(self, source):
     """Call a GRR Client Action."""
@@ -619,37 +554,6 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
         next_state=self.ProcessCollected.__name__,
         **self.InterpolateDict(source.attributes.get("action_args", {})),
     )
-
-  def CallFallback(self, artifact_name, request_data):
-    if artifact_name not in artifact_fallbacks.FALLBACK_REGISTRY:
-      return False
-
-    fallback_flow = artifact_fallbacks.FALLBACK_REGISTRY[artifact_name]
-
-    if artifact_name in self.state.called_fallbacks:
-      self.Log(
-          "Already called fallback class %s for artifact: %s",
-          fallback_flow,
-          artifact_name,
-      )
-      return False
-
-    self.Log(
-        "Calling fallback class %s for artifact: %s",
-        fallback_flow,
-        artifact_name,
-    )
-
-    self.CallFlow(
-        fallback_flow,
-        request_data=request_data.ToDict(),
-        artifact_name=artifact_name,
-        next_state=self.ProcessCollected.__name__,
-    )
-
-    # Make sure we only try this once
-    self.state.called_fallbacks.add(artifact_name)
-    return True
 
   def ProcessCollected(self, responses):
     """Each individual collector will call back into here.
@@ -680,17 +584,10 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
           responses.status,
       )
 
-      # If the ArtifactDescriptor specifies a fallback for the failed Artifact,
-      # call the fallback without processing any responses of the failed
-      # artifact. If there is no fallback, process any responses that have been
-      # received before the child ArtifactCollector failed.
-      if self.CallFallback(artifact_name, responses.request_data):
-        return
-
       self.state.failed_count += 1
       self.state.artifacts_failed.append(artifact_name)
 
-    self._ParseResponses(list(responses), artifact_name, source)
+    self._ProcessResponses(list(responses), artifact_name, source)
 
   def ProcessCollectedRegistryStatEntry(self, responses):
     """Create AFF4 objects for registry statentries.
@@ -786,7 +683,7 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
     if source:
       return source["returned_types"]
 
-  def _ParseResponses(self, responses, artifact_name, source):
+  def _ProcessResponses(self, responses, artifact_name, source):
     """Create a result parser sending different arguments for diff parsers.
 
     Args:
@@ -796,19 +693,11 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
     """
     artifact_return_types = self._GetArtifactReturnTypes(source)
 
-    if self.args.apply_parsers:
-      parser_factory = parsers.ArtifactParserFactory(artifact_name)
-      results = artifact.ApplyParsersToResponses(
-          parser_factory, responses, self
-      )
-    else:
-      results = responses
-
     # Increment artifact result count in flow progress.
     progress = self._GetOrInsertArtifactProgress(artifact_name)
-    progress.num_results += len(results)
+    progress.num_results += len(responses)
 
-    for result in results:
+    for result in responses:
       result_type = result.__class__.__name__
       if result_type == "Anomaly":
         self.SendReply(result)
@@ -817,7 +706,9 @@ class ArtifactCollectorFlow(flow_base.FlowBase):
         self.SendReply(result, tag="artifact:%s" % artifact_name)
 
   def GetProgress(self) -> rdf_artifacts.ArtifactCollectorFlowProgress:
-    return self.state.progress
+    if hasattr(self.state, "progress"):
+      return self.state.progress
+    return rdf_artifacts.ArtifactCollectorFlowProgress()
 
   def _GetOrInsertArtifactProgress(
       self, name: str
@@ -871,30 +762,29 @@ class ArtifactFilesDownloaderFlow(
     # If we're dealing with plain file StatEntry, just
     # return it's pathspec - there's nothing to parse
     # and guess.
-    if isinstance(
-        response, rdf_client_fs.StatEntry
-    ) and response.pathspec.pathtype in [
-        rdf_paths.PathSpec.PathType.TSK,
-        rdf_paths.PathSpec.PathType.OS,
-        rdf_paths.PathSpec.PathType.NTFS,
-    ]:
-      return [response.pathspec]
+    if isinstance(response, rdf_client_fs.StatEntry):
+      if response.pathspec.pathtype in [
+          rdf_paths.PathSpec.PathType.TSK,
+          rdf_paths.PathSpec.PathType.OS,
+          rdf_paths.PathSpec.PathType.NTFS,
+      ]:
+        yield response.pathspec
 
-    knowledge_base = _ReadClientKnowledgeBase(self.client_id)
+      if response.pathspec.pathtype in [
+          rdf_paths.PathSpec.PathType.REGISTRY,
+      ]:
+        knowledge_base = _ReadClientKnowledgeBase(self.client_id)
 
-    if self.args.use_raw_filesystem_access:
-      path_type = rdf_paths.PathSpec.PathType.TSK
-    else:
-      path_type = rdf_paths.PathSpec.PathType.OS
+        if self.args.use_raw_filesystem_access:
+          path_type = rdf_paths.PathSpec.PathType.TSK
+        else:
+          path_type = rdf_paths.PathSpec.PathType.OS
 
-    p = windows_persistence.WindowsPersistenceMechanismsParser()
-    parsed_items = p.ParseResponse(knowledge_base, response)
-    parsed_pathspecs = [item.pathspec for item in parsed_items]
-
-    for pathspec in parsed_pathspecs:
-      pathspec.pathtype = path_type
-
-    return parsed_pathspecs
+        for path in path_detection_windows.DetectExecutablePaths(
+            [response.registry_data.string],
+            artifact_utils.GetWindowsEnvironmentVariablesMap(knowledge_base),
+        ):
+          yield rdf_paths.PathSpec(path=path, pathtype=path_type)
 
   def Start(self):
     super().Start()
@@ -924,7 +814,7 @@ class ArtifactFilesDownloaderFlow(
     results_with_pathspecs = []
     results_without_pathspecs = []
     for response in responses:
-      pathspecs = self._FindMatchingPathspecs(response)
+      pathspecs = list(self._FindMatchingPathspecs(response))
       if pathspecs:
         for pathspec in pathspecs:
           result = ArtifactFilesDownloaderResult(

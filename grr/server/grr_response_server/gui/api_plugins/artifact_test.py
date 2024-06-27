@@ -8,6 +8,7 @@ from absl import app
 
 from grr_response_core import config
 from grr_response_core.lib.rdfvalues import artifacts as rdf_artifacts
+from grr_response_proto.api import artifact_pb2 as api_artifact_pb2
 from grr_response_server import artifact
 from grr_response_server.gui import api_call_context
 from grr_response_server.gui import api_test_lib
@@ -29,18 +30,23 @@ class ApiListArtifactsHandlerTest(flow_test_lib.FlowTestsBaseclass):
 
   @artifact_test_lib.PatchCleanArtifactRegistry
   def testNoArtifacts(self, _):
-    result = self.handler.Handle(self.handler.args_type(), context=self.context)
+    result = self.handler.Handle(
+        api_artifact_pb2.ApiListArtifactsArgs(), context=self.context
+    )
 
     self.assertEqual(result.total_count, 0)
-    self.assertEqual(result.items, [])
+    self.assertEmpty(result.items)
 
   @artifact_test_lib.PatchDefaultArtifactRegistry
   def testPrepackagedArtifacts(self, registry):
-    test_artifacts_file = os.path.join(config.CONFIG["Test.data_dir"],
-                                       "artifacts", "test_artifacts.json")
+    test_artifacts_file = os.path.join(
+        config.CONFIG["Test.data_dir"], "artifacts", "test_artifacts.json"
+    )
     registry.AddFileSource(test_artifacts_file)
 
-    result = self.handler.Handle(self.handler.args_type(), context=self.context)
+    result = self.handler.Handle(
+        api_artifact_pb2.ApiListArtifactsArgs(), context=self.context
+    )
 
     # Some artifacts are guaranteed to be returned, as they're defined in
     # the test_data/artifacts/test_artifacts.json.
@@ -69,10 +75,13 @@ class ApiUploadArtifactHandlerTest(api_test_lib.ApiCallHandlerTest):
 
   @artifact_test_lib.PatchCleanArtifactRegistry
   def testUpload(self, registry):
-    test_artifacts_file = os.path.join(config.CONFIG["Test.data_dir"],
-                                       "artifacts", "test_artifact.json")
+    test_artifacts_file = os.path.join(
+        config.CONFIG["Test.data_dir"], "artifacts", "test_artifact.json"
+    )
     with open(test_artifacts_file, "rb") as fd:
-      args = self.handler.args_type(artifact=fd.read())
+      args = api_artifact_pb2.ApiUploadArtifactArgs(
+          artifact=fd.read().decode("utf-8")
+      )
 
     with self.assertRaises(rdf_artifacts.ArtifactNotRegisteredError):
       registry.GetArtifact("TestDrivers")
@@ -91,8 +100,9 @@ class ApiDeleteArtifactsHandlerTest(api_test_lib.ApiCallHandlerTest):
     self.handler = artifact_plugin.ApiDeleteArtifactsHandler()
 
   def UploadTestArtifacts(self):
-    test_artifacts_file = os.path.join(config.CONFIG["Test.data_dir"],
-                                       "artifacts", "test_artifacts.json")
+    test_artifacts_file = os.path.join(
+        config.CONFIG["Test.data_dir"], "artifacts", "test_artifacts.json"
+    )
     with io.open(test_artifacts_file, mode="r", encoding="utf-8") as fd:
       artifact.UploadArtifactYamlFile(fd.read())
 
@@ -100,8 +110,9 @@ class ApiDeleteArtifactsHandlerTest(api_test_lib.ApiCallHandlerTest):
     self.UploadTestArtifacts()
     count = len(registry.GetArtifacts(reload_datastore_artifacts=True))
 
-    args = self.handler.args_type(
-        names=["TestFilesArtifact", "WMIActiveScriptEventConsumer"])
+    args = api_artifact_pb2.ApiDeleteArtifactsArgs(
+        names=["TestFilesArtifact", "WMIActiveScriptEventConsumer"]
+    )
     self.handler.Handle(args, context=self.context)
 
     new_count = len(registry.GetArtifacts())
@@ -111,19 +122,24 @@ class ApiDeleteArtifactsHandlerTest(api_test_lib.ApiCallHandlerTest):
 
   def testDeleteDependency(self, registry):
     self.UploadTestArtifacts()
-    args = self.handler.args_type(names=["TestAggregationArtifact"])
+    args = api_artifact_pb2.ApiDeleteArtifactsArgs(
+        names=["TestAggregationArtifact"]
+    )
     with self.assertRaises(ValueError):
       self.handler.Handle(args, context=self.context)
 
   def testDeleteNonExistentArtifact(self, registry):
     self.UploadTestArtifacts()
-    args = self.handler.args_type(names=["NonExistentArtifact"])
+    args = api_artifact_pb2.ApiDeleteArtifactsArgs(
+        names=["NonExistentArtifact"]
+    )
     e = self.assertRaises(ValueError)
     with e:
       self.handler.Handle(args, context=self.context)
     self.assertEqual(
         str(e.exception),
-        "Artifact(s) to delete (NonExistentArtifact) not found.")
+        "Artifact(s) to delete (NonExistentArtifact) not found.",
+    )
 
 
 def main(argv):

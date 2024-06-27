@@ -23,6 +23,20 @@
           <mat-option [value]="RuleSetMatchMode.MATCH_ANY">Match Any (or)</mat-option>
         </mat-select>
       </mat-form-field>
+
+      <!-- TODO: Refactor into markdown component. -->
+      <ng-container *ngIf="presubmitWarning$ | async as warning">
+        <mat-card class="warning">
+          <mat-card-content>
+            <mat-icon>info</mat-icon>
+            <div class="text-container" [innerHTML]="warning.htmlSnippet | sanitize"></div>
+            <button mat-button type="button" class="reset" (click)="resetDefault()" *ngIf="defaultClientRuleSet">
+              Reset default
+            </button>
+          </mat-card-content>
+        </mat-card>
+      </ng-container>
+
       <div *ngIf="conditions().controls.length > 0" class="rules-container">
         <div *ngFor="let condition of conditions().controls; let conditionIndex=index"
              [attr.name]="'condition_'+conditionIndex"
@@ -89,14 +103,20 @@
   <div [formGroup]="form" class="os-container">
     <div class="rule-content" [formGroup]="osOptionGroup(id)">
       <div class="os-rule-title">{{ title }}</div>
-        <mat-checkbox *ngFor="let os of operatingSystems | keyvalue"
-                    [id]="'condition_'+id+'_'+os.key | lowercase"
-                    [checked]="os.value"
-                    [formControl]="osOptionControl(id, os.key)"
-                    color="primary">
-          {{ os.key }}
-        </mat-checkbox>
+      <mat-checkbox *ngFor="let os of operatingSystems | keyvalue"
+                  [id]="'condition_'+id+'_'+os.key | lowercase"
+                  [checked]="os.value"
+                  [formControl]="osOptionControl(id, os.key)"
+                  color="primary">
+        {{ os.key }}
+      </mat-checkbox>
     </div>
+    <mat-error
+        class="rule-error"
+        [id]="'condition_'+id+'_error'"
+        *ngIf="osOptionGroup(id).hasError('nothingSelected')">
+      No clients will match, select at least one OS.
+    </mat-error>
   </div>
 </ng-template>
 

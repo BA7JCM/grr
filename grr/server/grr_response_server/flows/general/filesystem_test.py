@@ -11,13 +11,11 @@ from absl import app
 from absl.testing import absltest
 
 from grr_response_core.lib import utils
-from grr_response_core.lib.parsers import windows_registry_parser as winreg_parser
-from grr_response_core.lib.parsers import wmi_parser
-from grr_response_core.lib.rdfvalues import client as rdf_client
 from grr_response_core.lib.rdfvalues import file_finder as rdf_file_finder
 from grr_response_core.lib.rdfvalues import paths as rdf_paths
 from grr_response_core.lib.rdfvalues import structs as rdf_structs
 from grr_response_core.lib.util import temp
+from grr_response_proto import knowledge_base_pb2
 from grr_response_server import data_store
 from grr_response_server import file_store
 from grr_response_server import flow_responses
@@ -38,7 +36,6 @@ from grr.test_lib import acl_test_lib
 from grr.test_lib import action_mocks
 from grr.test_lib import db_test_lib
 from grr.test_lib import flow_test_lib
-from grr.test_lib import parser_test_lib
 from grr.test_lib import test_lib
 from grr.test_lib import vfs_test_lib
 from grr_response_proto.rrg import fs_pb2 as rrg_fs_pb2
@@ -227,8 +224,8 @@ class TestFilesystem(flow_test_lib.FlowTestsBaseclass):
   def testGlob(self):
     """Test that glob works properly."""
     users = [
-        rdf_client.User(username="test"),
-        rdf_client.User(username="syslog")
+        knowledge_base_pb2.User(username="test"),
+        knowledge_base_pb2.User(username="syslog"),
     ]
     client_id = self.SetupClient(0, users=users)
 
@@ -236,8 +233,8 @@ class TestFilesystem(flow_test_lib.FlowTestsBaseclass):
 
     # This glob selects all files which start with the username on this system.
     paths = [
-        os.path.join(self.base_path, "%%Users.username%%*"),
-        os.path.join(self.base_path, "VFSFixture/var/*/wtmp")
+        os.path.join(self.base_path, "%%users.username%%*"),
+        os.path.join(self.base_path, "VFSFixture/var/*/wtmp"),
     ]
 
     flow_test_lib.TestFlowHelper(
@@ -282,8 +279,8 @@ class TestFilesystem(flow_test_lib.FlowTestsBaseclass):
   def testGlobWithStarStarRootPath(self):
     """Test ** expressions with root_path."""
     users = [
-        rdf_client.User(username="test"),
-        rdf_client.User(username="syslog")
+        knowledge_base_pb2.User(username="test"),
+        knowledge_base_pb2.User(username="syslog"),
     ]
     self.client_id = self.SetupClient(0, users=users)
 
@@ -519,9 +516,9 @@ class TestFilesystem(flow_test_lib.FlowTestsBaseclass):
   def testGlobDirectory(self):
     """Test that glob expands directories."""
     users = [
-        rdf_client.User(username="test", appdata="test_data/index.dat"),
-        rdf_client.User(username="test2", appdata="test_data/History"),
-        rdf_client.User(username="test3", appdata="%%PATH%%"),
+        knowledge_base_pb2.User(username="test", appdata="test_data/index.dat"),
+        knowledge_base_pb2.User(username="test2", appdata="test_data/History"),
+        knowledge_base_pb2.User(username="test3", appdata="%%PATH%%"),
     ]
     self.client_id = self.SetupClient(0, users=users)
 
@@ -583,9 +580,8 @@ class TestFilesystem(flow_test_lib.FlowTestsBaseclass):
     flow_obj = data_store.REL_DB.ReadFlowObject(self.client_id, flow_id)
     self.assertEqual(
         flow_obj.error_message,
-        "Some attributes are not part of the knowledgebase: "
-        "weird_illegal_attribute")
-    self.assertIn("KbInterpolationUnknownAttributesError", flow_obj.backtrace)
+        "`%%Weird_illegal_attribute%%` does not exist",
+    )
 
   def testGlobRoundtrips(self):
     """Tests that glob doesn't use too many client round trips."""
@@ -763,53 +759,6 @@ class TestFilesystem(flow_test_lib.FlowTestsBaseclass):
         self.client_id, rdf_objects.PathInfo.PathType.OS, components + ["sub1"])
     filenames = [child.components[-1] for child in children]
     self.assertCountEqual(filenames, expected_filenames_sub)
-
-  def testDiskVolumeInfoOSXLinux(self):
-    client_mock = action_mocks.UnixVolumeClientMock()
-    session_id = flow_test_lib.TestFlowHelper(
-        filesystem.DiskVolumeInfo.__name__,
-        client_mock,
-        client_id=self.client_id,
-        creator=self.test_username,
-        path_list=["/usr/local", "/home"])
-
-    results = flow_test_lib.GetFlowResults(self.client_id, session_id)
-
-    self.assertCountEqual([x.unixvolume.mount_point for x in results],
-                          ["/", "/usr"])
-
-  @parser_test_lib.WithParser("WmiDisk", wmi_parser.WMILogicalDisksParser)
-  @parser_test_lib.WithParser("WinReg", winreg_parser.WinSystemRootParser)
-  def testDiskVolumeInfoWindows(self):
-    self.client_id = self.SetupClient(0, system="Windows")
-    with vfs_test_lib.VFSOverrider(rdf_paths.PathSpec.PathType.REGISTRY,
-                                   vfs_test_lib.FakeRegistryVFSHandler):
-
-      client_mock = action_mocks.WindowsVolumeClientMock()
-      session_id = flow_test_lib.TestFlowHelper(
-          filesystem.DiskVolumeInfo.__name__,
-          client_mock,
-          client_id=self.client_id,
-          creator=self.test_username,
-          path_list=[r"D:\temp\something", r"/var/tmp"])
-
-      results = flow_test_lib.GetFlowResults(self.client_id, session_id)
-
-      # We asked for D and we guessed systemroot (C) for "/var/tmp", but only
-      # C and Z are present, so we should just get C.
-      self.assertCountEqual([x.windowsvolume.drive_letter for x in results],
-                            ["C:"])
-
-      session_id = flow_test_lib.TestFlowHelper(
-          filesystem.DiskVolumeInfo.__name__,
-          client_mock,
-          client_id=self.client_id,
-          creator=self.test_username,
-          path_list=[r"Z:\blah"])
-
-      results = flow_test_lib.GetFlowResults(self.client_id, session_id)
-      self.assertCountEqual([x.windowsvolume.drive_letter for x in results],
-                            ["Z:"])
 
   def testGlobBackslashHandlingNoRegex(self):
     self._Touch("foo.txt")

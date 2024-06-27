@@ -26,9 +26,7 @@ const READABLE_SOURCE_NAME: {[key in SourceType]?: string} = {
   [SourceType.ARTIFACT_GROUP]: 'Collects artifact',
   [SourceType.ARTIFACT]: 'Collects artifact',
   [SourceType.COMMAND]: 'Executes command',
-  [SourceType.DIRECTORY]: 'Collects directory',
   [SourceType.FILE]: 'Collects file',
-  [SourceType.GREP]: 'Greps',
   [SourceType.GRR_CLIENT_ACTION]: 'Executes client action',
   [SourceType.LIST_FILES]: 'Lists files in',
   [SourceType.PATH]: 'Collects path',
@@ -78,9 +76,7 @@ function getReadableSources(source: ArtifactSource): readonly string[] {
     case SourceType.COMMAND:
       return [source.cmdline];
 
-    case SourceType.DIRECTORY:
     case SourceType.FILE:
-    case SourceType.GREP:
     case SourceType.PATH:
       return source.paths;
 
@@ -235,7 +231,6 @@ export class ArtifactCollectorFlowForm extends FlowArgumentForm<
   override convertFormStateToFlowArgs(formState: ControlValues<Controls>) {
     return {
       artifactList: formState.artifactName ? [formState.artifactName] : [],
-      applyParsers: false,
     };
   }
 

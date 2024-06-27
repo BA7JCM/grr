@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Provides conversion functions to be used during RDFProtoStruct migration."""
+
 from grr_response_proto.api import flow_pb2
 from grr_response_server.gui.api_plugins import flow
 
@@ -120,74 +121,6 @@ def ToRDFApiListFlowResultsResult(
     proto: flow_pb2.ApiListFlowResultsResult,
 ) -> flow.ApiListFlowResultsResult:
   return flow.ApiListFlowResultsResult.FromSerializedBytes(
-      proto.SerializeToString()
-  )
-
-
-def ToProtoApiListParsedFlowResultsArgs(
-    rdf: flow.ApiListParsedFlowResultsArgs,
-) -> flow_pb2.ApiListParsedFlowResultsArgs:
-  return rdf.AsPrimitiveProto()
-
-
-def ToRDFApiListParsedFlowResultsArgs(
-    proto: flow_pb2.ApiListParsedFlowResultsArgs,
-) -> flow.ApiListParsedFlowResultsArgs:
-  return flow.ApiListParsedFlowResultsArgs.FromSerializedBytes(
-      proto.SerializeToString()
-  )
-
-
-def ToProtoApiListParsedFlowResultsResult(
-    rdf: flow.ApiListParsedFlowResultsResult,
-) -> flow_pb2.ApiListParsedFlowResultsResult:
-  return rdf.AsPrimitiveProto()
-
-
-def ToRDFApiListParsedFlowResultsResult(
-    proto: flow_pb2.ApiListParsedFlowResultsResult,
-) -> flow.ApiListParsedFlowResultsResult:
-  return flow.ApiListParsedFlowResultsResult.FromSerializedBytes(
-      proto.SerializeToString()
-  )
-
-
-def ToProtoApiParserDescriptor(
-    rdf: flow.ApiParserDescriptor,
-) -> flow_pb2.ApiParserDescriptor:
-  return rdf.AsPrimitiveProto()
-
-
-def ToRDFApiParserDescriptor(
-    proto: flow_pb2.ApiParserDescriptor,
-) -> flow.ApiParserDescriptor:
-  return flow.ApiParserDescriptor.FromSerializedBytes(proto.SerializeToString())
-
-
-def ToProtoApiListFlowApplicableParsersArgs(
-    rdf: flow.ApiListFlowApplicableParsersArgs,
-) -> flow_pb2.ApiListFlowApplicableParsersArgs:
-  return rdf.AsPrimitiveProto()
-
-
-def ToRDFApiListFlowApplicableParsersArgs(
-    proto: flow_pb2.ApiListFlowApplicableParsersArgs,
-) -> flow.ApiListFlowApplicableParsersArgs:
-  return flow.ApiListFlowApplicableParsersArgs.FromSerializedBytes(
-      proto.SerializeToString()
-  )
-
-
-def ToProtoApiListFlowApplicableParsersResult(
-    rdf: flow.ApiListFlowApplicableParsersResult,
-) -> flow_pb2.ApiListFlowApplicableParsersResult:
-  return rdf.AsPrimitiveProto()
-
-
-def ToRDFApiListFlowApplicableParsersResult(
-    proto: flow_pb2.ApiListFlowApplicableParsersResult,
-) -> flow.ApiListFlowApplicableParsersResult:
-  return flow.ApiListFlowApplicableParsersResult.FromSerializedBytes(
       proto.SerializeToString()
   )
 

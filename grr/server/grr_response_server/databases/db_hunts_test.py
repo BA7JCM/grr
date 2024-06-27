@@ -9,16 +9,15 @@ from google.protobuf import any_pb2
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib.rdfvalues import client as rdf_client
 from grr_response_core.lib.rdfvalues import client_stats as rdf_client_stats
-from grr_response_core.lib.rdfvalues import stats as rdf_stats
 from grr_response_core.lib.rdfvalues import structs as rdf_structs
 from grr_response_proto import flows_pb2
 from grr_response_proto import hunts_pb2
 from grr_response_proto import jobs_pb2
-from grr_response_proto import objects_pb2
 from grr_response_proto import output_plugin_pb2
 from grr_response_server import flow
 from grr_response_server.databases import db
 from grr_response_server.databases import db_test_utils
+from grr_response_server.models import hunts as model_hunts
 from grr_response_server.output_plugins import email_plugin
 from grr_response_server.rdfvalues import flow_objects as rdf_flow_objects
 from grr_response_server.rdfvalues import hunt_objects as rdf_hunt_objects
@@ -1554,30 +1553,6 @@ class DatabaseTestHuntMixin(object):
               % (tag_value, type_value, substring_value, expected, results),
           )
 
-  def testReadHuntResultsReturnsPayloadWithMissingTypeAsSpecialValue(self):
-    hunt_id = db_test_utils.InitializeHunt(self.db)
-
-    client_id, flow_id = self._SetupHuntClientAndFlow(hunt_id=hunt_id)
-    sample_results = self._SampleSingleTypeHuntResults(
-        client_id=client_id, flow_id=flow_id, hunt_id=hunt_id
-    )
-    self._WriteHuntResults(sample_results)
-
-    type_name = rdf_client.ClientSummary.__name__
-    cls = rdfvalue.RDFValue.classes.pop(type_name)
-
-    results = self.db.ReadHuntResults(hunt_id, 0, 100)
-    rdfvalue.RDFValue.classes[type_name] = cls
-
-    self.assertLen(sample_results, len(results))
-    for r in results:
-      self.assertTrue(
-          r.payload.Is(objects_pb2.SerializedValueOfUnrecognizedType.DESCRIPTOR)
-      )
-      payload = objects_pb2.SerializedValueOfUnrecognizedType()
-      r.payload.Unpack(payload)
-      self.assertEqual(payload.type_name, type_name)
-
   def testReadHuntResultsIgnoresChildFlowsResults(self):
     client_id = db_test_utils.InitializeClient(self.db)
     hunt_id = db_test_utils.InitializeHunt(self.db)
@@ -2243,8 +2218,8 @@ class DatabaseTestHuntMixin(object):
 
     usage_stats = self.db.ReadHuntClientResourcesStats(hunt_id)
 
-    expected_cpu_bins = rdf_stats.ClientResourcesStats.CPU_STATS_BINS
-    expected_network_bins = rdf_stats.ClientResourcesStats.NETWORK_STATS_BINS
+    expected_cpu_bins = model_hunts.CPU_STATS_BINS
+    expected_network_bins = model_hunts.NETWORK_STATS_BINS
     expected_user_cpu_histogram = jobs_pb2.StatsHistogram(
         bins=[
             jobs_pb2.StatsHistogramBin(num=num, range_max_value=max_range)

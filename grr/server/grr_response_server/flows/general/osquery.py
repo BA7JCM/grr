@@ -258,6 +258,7 @@ class OsqueryFlow(transfer.MultiGetFileLogic, flow_base.FlowBase):
   ) -> None:
     if not responses.success:
       status = responses.status
+      assert status is not None, "Failed response status must be set."
 
       message = f"{status.error_message}: {status.backtrace}"
       self._UpdateProgressWithError(message)
@@ -277,7 +278,9 @@ class OsqueryFlow(transfer.MultiGetFileLogic, flow_base.FlowBase):
     self._FileCollectionFromColumns(responses)
 
   def GetProgress(self) -> rdf_osquery.OsqueryProgress:
-    return self.state.progress
+    if hasattr(self.state, "progress"):
+      return self.state.progress
+    return rdf_osquery.OsqueryProgress()
 
   def ReceiveFetchedFile(self,
                          stat_entry: rdf_client_fs.StatEntry,

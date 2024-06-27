@@ -3,9 +3,9 @@
 
 from typing import Optional
 
+from grr_response_proto.api import user_pb2 as api_user_pb2
 from grr_response_server.gui import api_call_context
 from grr_response_server.gui import api_call_router
-
 from grr_response_server.gui.api_plugins import artifact as api_artifact
 from grr_response_server.gui.api_plugins import client as api_client
 from grr_response_server.gui.api_plugins import config as api_config
@@ -44,9 +44,6 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
   def SearchClients(self, args, context=None):
     return api_client.ApiSearchClientsHandler()
 
-  def StructuredSearchClients(self, args, context=None):
-    return api_client.ApiStructuredSearchClientsHandler()
-
   def VerifyAccess(self, args, context=None):
     return api_client.ApiVerifyAccessHandler()
 
@@ -74,35 +71,35 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
   def KillFleetspeak(
       self,
       args: api_client.ApiKillFleetspeakArgs,
-      context: Optional[api_call_context.ApiCallContext] = None
+      context: Optional[api_call_context.ApiCallContext] = None,
   ) -> api_client.ApiKillFleetspeakHandler:
     return api_client.ApiKillFleetspeakHandler()
 
   def RestartFleetspeakGrrService(
       self,
       args: api_client.ApiRestartFleetspeakGrrServiceArgs,
-      context: Optional[api_call_context.ApiCallContext] = None
+      context: Optional[api_call_context.ApiCallContext] = None,
   ) -> api_client.ApiRestartFleetspeakGrrServiceHandler:
     return api_client.ApiRestartFleetspeakGrrServiceHandler()
 
   def DeleteFleetspeakPendingMessages(
       self,
       args: api_client.ApiDeleteFleetspeakPendingMessagesArgs,
-      context: Optional[api_call_context.ApiCallContext] = None
+      context: Optional[api_call_context.ApiCallContext] = None,
   ) -> api_client.ApiDeleteFleetspeakPendingMessagesHandler:
     return api_client.ApiDeleteFleetspeakPendingMessagesHandler()
 
   def GetFleetspeakPendingMessages(
       self,
       args: api_client.ApiGetFleetspeakPendingMessagesArgs,
-      context: Optional[api_call_context.ApiCallContext] = None
+      context: Optional[api_call_context.ApiCallContext] = None,
   ) -> api_client.ApiGetFleetspeakPendingMessagesHandler:
     return api_client.ApiGetFleetspeakPendingMessagesHandler()
 
   def GetFleetspeakPendingMessageCount(
       self,
       args: api_client.ApiGetFleetspeakPendingMessageCountArgs,
-      context: Optional[api_call_context.ApiCallContext] = None
+      context: Optional[api_call_context.ApiCallContext] = None,
   ) -> api_client.ApiGetFleetspeakPendingMessageCountHandler:
     return api_client.ApiGetFleetspeakPendingMessageCountHandler()
 
@@ -115,7 +112,7 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
   def BrowseFilesystem(
       self,
       args: api_vfs.ApiBrowseFilesystemArgs,
-      context: Optional[api_call_context.ApiCallContext] = None
+      context: Optional[api_call_context.ApiCallContext] = None,
   ) -> api_vfs.ApiBrowseFilesystemHandler:
     return api_vfs.ApiBrowseFilesystemHandler()
 
@@ -155,12 +152,6 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
   def GetVfsFileContentUpdateState(self, args, context=None):
     return api_vfs.ApiGetVfsFileContentUpdateStateHandler()
 
-  def GetFileDecoders(self, args, context=None):
-    return api_vfs.ApiGetFileDecodersHandler()
-
-  def GetDecodedFileBlob(self, args, context=None):
-    return api_vfs.ApiGetDecodedFileHandler()
-
   # Clients labels methods.
   # ======================
   #
@@ -193,20 +184,6 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
 
   def ListFlowResults(self, args, context=None):
     return api_flow.ApiListFlowResultsHandler()
-
-  def ListParsedFlowResults(
-      self,
-      args: api_flow.ApiListParsedFlowResultsArgs,
-      context: Optional[api_call_context.ApiCallContext] = None,
-  ) -> api_flow.ApiListParsedFlowResultsHandler:
-    return api_flow.ApiListParsedFlowResultsHandler()
-
-  def ListFlowApplicableParsers(
-      self,
-      args: api_flow.ApiListFlowApplicableParsersArgs,
-      context: Optional[api_call_context.ApiCallContext] = None,
-  ) -> api_flow.ApiListFlowApplicableParsersHandler:
-    return api_flow.ApiListFlowApplicableParsersHandler()
 
   def GetExportedFlowResults(self, args, context=None):
     return api_flow.ApiGetExportedFlowResultsHandler()
@@ -381,8 +358,9 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
     return api_timeline.ApiGetCollectedHuntTimelinesHandler()
 
   def CreatePerClientFileCollectionHunt(
-      self, args: api_hunt.ApiCreatePerClientFileCollectionHuntArgs,
-      context: api_call_context.ApiCallContext
+      self,
+      args: api_hunt.ApiCreatePerClientFileCollectionHuntArgs,
+      context: api_call_context.ApiCallContext,
   ) -> api_hunt.ApiCreatePerClientFileCollectionHuntHandler:
     return api_hunt.ApiCreatePerClientFileCollectionHuntHandler()
 
@@ -460,8 +438,25 @@ class ApiCallRouterWithoutChecks(api_call_router.ApiCallRouterStub):
     return api_user.ApiListAndResetUserNotificationsHandler()
 
   def GetGrrUser(self, args, context=None):
-    interface_traits = api_user.ApiGrrUserInterfaceTraits().EnableAll()
-    interface_traits.hunt_approval_required = False
+    interface_traits = api_user_pb2.ApiGrrUserInterfaceTraits(
+        cron_jobs_nav_item_enabled=True,
+        create_cron_job_action_enabled=True,
+        hunt_manager_nav_item_enabled=True,
+        create_hunt_action_enabled=True,
+        show_statistics_nav_item_enabled=True,
+        server_load_nav_item_enabled=True,
+        manage_binaries_nav_item_enabled=True,
+        upload_binary_action_enabled=True,
+        settings_nav_item_enabled=True,
+        artifact_manager_nav_item_enabled=True,
+        upload_artifact_action_enabled=True,
+        search_clients_action_enabled=True,
+        browse_virtual_file_system_nav_item_enabled=True,
+        start_client_flow_nav_item_enabled=True,
+        manage_client_flows_nav_item_enabled=True,
+        modify_client_labels_action_enabled=True,
+        hunt_approval_required=False,
+    )
     return api_user.ApiGetOwnGrrUserHandler(interface_traits=interface_traits)
 
   def UpdateGrrUser(self, args, context=None):

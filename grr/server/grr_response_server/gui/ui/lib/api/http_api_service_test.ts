@@ -267,12 +267,12 @@ describe('HttpApiService', () => {
       url: `${URL_PREFIX}/hunts/1234/results?huntId=1234&count=10`,
     });
     const resp1: ApiListHuntResultsResult = {
-      items: [{clientId: 'C.1', payloadType: 'foo'}],
+      items: [{clientId: 'C.1'}],
     };
     req1.flush(resp1);
 
     expect(values.length).toEqual(1);
-    expect(values).toEqual([[{clientId: 'C.1', payloadType: 'foo'}]]);
+    expect(values).toEqual([[{clientId: 'C.1'}]]);
 
     tick(httpApiService.POLLING_INTERVAL);
 
@@ -281,12 +281,12 @@ describe('HttpApiService', () => {
       url: `${URL_PREFIX}/hunts/1234/results?huntId=1234&count=10`,
     });
     const resp2: ApiListHuntResultsResult = {
-      items: [{clientId: 'C.2', payloadType: 'bar'}],
+      items: [{clientId: 'C.2'}],
     };
     req2.flush(resp2);
 
     expect(values.length).toEqual(2);
-    expect(values[1]).toEqual([{clientId: 'C.2', payloadType: 'bar'}]);
+    expect(values[1]).toEqual([{clientId: 'C.2'}]);
 
     sub.unsubscribe();
 
@@ -314,11 +314,11 @@ describe('HttpApiService', () => {
     httpMock.verify();
 
     const resp1: ApiListHuntResultsResult = {
-      items: [{clientId: 'C.1', payloadType: 'foo'}],
+      items: [{clientId: 'C.1'}],
     };
     req1.flush(resp1);
     expect(values.length).toEqual(1);
-    expect(values).toEqual([[{clientId: 'C.1', payloadType: 'foo'}]]);
+    expect(values).toEqual([[{clientId: 'C.1'}]]);
 
     sub.unsubscribe();
   }));
@@ -336,7 +336,7 @@ describe('HttpApiService', () => {
     httpMock
       .expectOne({
         method: 'GET',
-        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser/`,
+        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser`,
       })
       .flush({});
 
@@ -361,7 +361,7 @@ describe('HttpApiService', () => {
     httpMock
       .expectOne({
         method: 'GET',
-        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser/`,
+        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser`,
       })
       .flush({
         scheduledFlows: [{scheduledFlowId: '123'}],
@@ -470,7 +470,7 @@ describe('HttpApiService', () => {
     httpMock
       .expectOne({
         method: 'GET',
-        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser/`,
+        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser`,
       })
       .flush({});
 
@@ -479,14 +479,14 @@ describe('HttpApiService', () => {
     httpMock
       .expectOne({
         method: 'DELETE',
-        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/123/`,
+        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/123`,
       })
       .flush({});
 
     httpMock
       .expectOne({
         method: 'GET',
-        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser/`,
+        url: `${URL_PREFIX}/clients/C.1234/scheduled-flows/testuser`,
       })
       .flush({
         scheduledFlows: [{scheduledFlowId: '456'}],

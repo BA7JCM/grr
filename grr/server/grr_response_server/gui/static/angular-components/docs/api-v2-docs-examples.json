@@ -16,8 +16,7 @@
         "name": "ListProcesses",
         "runnerArgs": {
           "clientId": "aff4:/C.1000000000000000",
-          "flowName": "ListProcesses",
-          "notifyToUser": false
+          "flowName": "ListProcesses"
         },
         "startedAt": "42000000",
         "state": "ERROR",
@@ -35,7 +34,7 @@
         "items": [
           {
             "count": "1",
-            "type": "RDFString"
+            "type": "DummyFlowResult"
           }
         ]
       },
@@ -223,9 +222,7 @@
             "filenameRegex": "."
           },
           "name": "ListProcesses",
-          "runnerArgs": {
-            "notifyToUser": true
-          }
+          "runnerArgs": {}
         }
       },
       "response": {
@@ -242,8 +239,7 @@
         "name": "ListProcesses",
         "runnerArgs": {
           "clientId": "aff4:/C.1000000000000000",
-          "flowName": "ListProcesses",
-          "notifyToUser": true
+          "flowName": "ListProcesses"
         },
         "startedAt": "42000000",
         "state": "RUNNING",
@@ -1075,6 +1071,220 @@
       "url": "/api/v2/clients/C.1000000000000000/versions?end=46000000&mode=full&start=44000000"
     }
   ],
+  "ApiGetConfigOptionHandler": [
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Client.company_name",
+        "type": "RDFString",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.StringValue",
+          "value": "Monstros S.A."
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Client.company_name"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "AdminUI.hunt_config",
+        "type": "AdminUIHuntConfig",
+        "value": {
+          "@type": "type.googleapis.com/grr.AdminUIHuntConfig",
+          "defaultExcludeLabels": [
+            "oh-oh"
+          ]
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/AdminUI.hunt_config"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Source.version_major",
+        "type": "RDFInteger",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "42"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Source.version_major"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Source.version_major",
+        "type": "RDFInteger",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "42"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Source.version_major"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Source.version_major",
+        "type": "RDFInteger",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "42"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Source.version_major"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Source.version_major",
+        "type": "RDFInteger",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "42"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Source.version_major"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Hunt.default_client_rate",
+        "type": "RDFInteger",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "42"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Hunt.default_client_rate"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Email.enable_custom_email_address",
+        "type": "RDFInteger",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "1"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Email.enable_custom_email_address"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": true,
+        "name": "Cron.disabled_cron_jobs"
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Cron.disabled_cron_jobs"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Server.fleetspeak_last_ping_threshold",
+        "type": "Duration",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.UInt64Value",
+          "value": "3600000000"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Server.fleetspeak_last_ping_threshold"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "Server.raw_filesystem_access_pathtype",
+        "type": "EnumNamedValue",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.Int64Value",
+          "value": "1"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Server.raw_filesystem_access_pathtype"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "ClientBuilder.build_type",
+        "type": "RDFString",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.StringValue",
+          "value": "Debug"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/ClientBuilder.build_type"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": true,
+        "name": "ClientBuilder.target_platforms"
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/ClientBuilder.target_platforms"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isInvalid": false,
+        "name": "ClientRepacker.output_filename",
+        "type": "RDFString",
+        "value": {
+          "@type": "type.googleapis.com/google.protobuf.StringValue",
+          "value": "GRR_0.0.0.0_"
+        }
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/ClientRepacker.output_filename"
+    },
+    {
+      "api_method": "GetConfigOption",
+      "method": "GET",
+      "response": {
+        "isRedacted": true,
+        "name": "Mysql.password"
+      },
+      "test_class": "ApiGetConfigOptionHandlerRegressionTest_http_v2",
+      "url": "/api/v2/config/Mysql.password"
+    }
+  ],
   "ApiGetCronJobApprovalHandler": [
     {
       "api_method": "GetCronJobApproval",
@@ -1245,7 +1455,10 @@
         "clientId": "C.1000000000000000",
         "context": {
           "clientResources": {
-            "cpuUsage": {}
+            "cpuUsage": {
+              "systemCpuTime": 0.0,
+              "userCpuTime": 0.0
+            }
           },
           "createTime": "42000000",
           "creator": "api_test_user",
@@ -1270,8 +1483,7 @@
           "clientId": "aff4:/C.1000000000000000",
           "cpuLimit": "60",
           "flowName": "Interrogate",
-          "networkBytesLimit": "8192",
-          "notifyToUser": true
+          "networkBytesLimit": "8192"
         },
         "startedAt": "42000000",
         "state": "RUNNING",
@@ -1321,7 +1533,10 @@
         "clientId": "C.1000000000000000",
         "context": {
           "clientResources": {
-            "cpuUsage": {}
+            "cpuUsage": {
+              "systemCpuTime": 0.0,
+              "userCpuTime": 0.0
+            }
           },
           "createTime": "42000000",
           "creator": "api_test_user",
@@ -1348,8 +1563,7 @@
           "clientId": "aff4:/C.1000000000000000",
           "cpuLimit": "60",
           "flowName": "Interrogate",
-          "networkBytesLimit": "8192",
-          "notifyToUser": true
+          "networkBytesLimit": "8192"
         },
         "startedAt": "42000000",
         "state": "ERROR",
@@ -1835,8 +2049,7 @@
           "name": "Interrogate",
           "runnerArgs": {
             "clientId": "aff4:/C.1000000000000000",
-            "flowName": "Interrogate",
-            "notifyToUser": true
+            "flowName": "Interrogate"
           },
           "startedAt": "42000000",
           "state": "RUNNING",
@@ -1951,93 +2164,85 @@
       "response": {
         "completePoints": [
           {
-            "xValue": 44.0,
-            "yValue": 0.0
-          },
-          {
             "xValue": 45.0,
             "yValue": 1.0
           },
           {
-            "xValue": 55.0,
+            "xValue": 54.990002,
             "yValue": 2.0
           },
           {
-            "xValue": 65.0,
+            "xValue": 64.980003,
             "yValue": 3.0
           },
           {
-            "xValue": 75.0,
+            "xValue": 74.970001,
             "yValue": 4.0
           },
           {
-            "xValue": 85.0,
+            "xValue": 84.959999,
             "yValue": 5.0
           },
           {
-            "xValue": 95.0,
+            "xValue": 94.949997,
             "yValue": 6.0
           },
           {
-            "xValue": 105.0,
+            "xValue": 104.94,
             "yValue": 7.0
           },
           {
-            "xValue": 115.0,
+            "xValue": 114.93,
             "yValue": 8.0
           },
           {
-            "xValue": 125.0,
+            "xValue": 124.92,
             "yValue": 9.0
           },
           {
-            "xValue": 135.0,
+            "xValue": 134.91,
             "yValue": 10.0
           }
         ],
         "startPoints": [
           {
-            "xValue": 44.0,
-            "yValue": 0.0
-          },
-          {
             "xValue": 45.0,
             "yValue": 1.0
           },
           {
-            "xValue": 55.0,
+            "xValue": 54.990002,
             "yValue": 2.0
           },
           {
-            "xValue": 65.0,
+            "xValue": 64.980003,
             "yValue": 3.0
           },
           {
-            "xValue": 75.0,
+            "xValue": 74.970001,
             "yValue": 4.0
           },
           {
-            "xValue": 85.0,
+            "xValue": 84.959999,
             "yValue": 5.0
           },
           {
-            "xValue": 95.0,
+            "xValue": 94.949997,
             "yValue": 6.0
           },
           {
-            "xValue": 105.0,
+            "xValue": 104.94,
             "yValue": 7.0
           },
           {
-            "xValue": 115.0,
+            "xValue": 114.93,
             "yValue": 8.0
           },
           {
-            "xValue": 125.0,
+            "xValue": 124.92,
             "yValue": 9.0
           },
           {
-            "xValue": 135.0,
+            "xValue": 134.91,
             "yValue": 10.0
           }
         ]
@@ -2051,37 +2256,85 @@
       "response": {
         "completePoints": [
           {
-            "xValue": 66.75,
+            "xValue": 45.0,
+            "yValue": 1.0
+          },
+          {
+            "xValue": 54.990002,
+            "yValue": 2.0
+          },
+          {
+            "xValue": 64.980003,
             "yValue": 3.0
           },
           {
-            "xValue": 89.5,
+            "xValue": 74.970001,
+            "yValue": 4.0
+          },
+          {
+            "xValue": 84.959999,
             "yValue": 5.0
           },
           {
-            "xValue": 112.25,
+            "xValue": 94.949997,
+            "yValue": 6.0
+          },
+          {
+            "xValue": 104.94,
             "yValue": 7.0
           },
           {
-            "xValue": 135.0,
+            "xValue": 114.93,
+            "yValue": 8.0
+          },
+          {
+            "xValue": 124.92,
+            "yValue": 9.0
+          },
+          {
+            "xValue": 134.91,
             "yValue": 10.0
           }
         ],
         "startPoints": [
           {
-            "xValue": 66.75,
+            "xValue": 45.0,
+            "yValue": 1.0
+          },
+          {
+            "xValue": 54.990002,
+            "yValue": 2.0
+          },
+          {
+            "xValue": 64.980003,
             "yValue": 3.0
           },
           {
-            "xValue": 89.5,
+            "xValue": 74.970001,
+            "yValue": 4.0
+          },
+          {
+            "xValue": 84.959999,
             "yValue": 5.0
           },
           {
-            "xValue": 112.25,
+            "xValue": 94.949997,
+            "yValue": 6.0
+          },
+          {
+            "xValue": 104.94,
             "yValue": 7.0
           },
           {
-            "xValue": 135.0,
+            "xValue": 114.93,
+            "yValue": 8.0
+          },
+          {
+            "xValue": 124.92,
+            "yValue": 9.0
+          },
+          {
+            "xValue": 134.91,
             "yValue": 10.0
           }
         ]
@@ -2095,93 +2348,85 @@
       "response": {
         "completePoints": [
           {
-            "xValue": 44.0,
-            "yValue": 0.0
-          },
-          {
             "xValue": 45.0,
             "yValue": 1.0
           },
           {
-            "xValue": 55.0,
+            "xValue": 54.990002,
             "yValue": 2.0
           },
           {
-            "xValue": 65.0,
+            "xValue": 64.980003,
             "yValue": 3.0
           },
           {
-            "xValue": 75.0,
+            "xValue": 74.970001,
             "yValue": 4.0
           },
           {
-            "xValue": 85.0,
+            "xValue": 84.959999,
             "yValue": 5.0
           },
           {
-            "xValue": 95.0,
+            "xValue": 94.949997,
             "yValue": 6.0
           },
           {
-            "xValue": 105.0,
+            "xValue": 104.94,
             "yValue": 7.0
           },
           {
-            "xValue": 115.0,
+            "xValue": 114.93,
             "yValue": 8.0
           },
           {
-            "xValue": 125.0,
+            "xValue": 124.92,
             "yValue": 9.0
           },
           {
-            "xValue": 135.0,
+            "xValue": 134.91,
             "yValue": 10.0
           }
         ],
         "startPoints": [
           {
-            "xValue": 44.0,
-            "yValue": 0.0
-          },
-          {
             "xValue": 45.0,
             "yValue": 1.0
           },
           {
-            "xValue": 55.0,
+            "xValue": 54.990002,
             "yValue": 2.0
           },
           {
-            "xValue": 65.0,
+            "xValue": 64.980003,
             "yValue": 3.0
           },
           {
-            "xValue": 75.0,
+            "xValue": 74.970001,
             "yValue": 4.0
           },
           {
-            "xValue": 85.0,
+            "xValue": 84.959999,
             "yValue": 5.0
           },
           {
-            "xValue": 95.0,
+            "xValue": 94.949997,
             "yValue": 6.0
           },
           {
-            "xValue": 105.0,
+            "xValue": 104.94,
             "yValue": 7.0
           },
           {
-            "xValue": 115.0,
+            "xValue": 114.93,
             "yValue": 8.0
           },
           {
-            "xValue": 125.0,
+            "xValue": 124.92,
             "yValue": 9.0
           },
           {
-            "xValue": 135.0,
+            "xValue": 134.91,
             "yValue": 10.0
           }
         ]
@@ -4271,7 +4516,6 @@
                 "stUid": 139592
               }
             },
-            "payloadType": "FileFinderResult",
             "timestamp": "42000000"
           }
         ]
@@ -4302,8 +4546,7 @@
             "name": "ListProcesses",
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "ListProcesses",
-              "notifyToUser": false
+              "flowName": "ListProcesses"
             },
             "startedAt": "44000000",
             "state": "RUNNING",
@@ -4318,8 +4561,7 @@
             "name": "Interrogate",
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "Interrogate",
-              "notifyToUser": true
+              "flowName": "Interrogate"
             },
             "startedAt": "43000000",
             "state": "RUNNING",
@@ -4353,8 +4595,7 @@
             },
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "ListProcesses",
-              "notifyToUser": false
+              "flowName": "ListProcesses"
             },
             "startedAt": "44000000",
             "state": "RUNNING",
@@ -4378,8 +4619,7 @@
             },
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "Interrogate",
-              "notifyToUser": true
+              "flowName": "Interrogate"
             },
             "startedAt": "43000000",
             "state": "RUNNING",
@@ -4413,8 +4653,7 @@
             },
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "ListProcesses",
-              "notifyToUser": false
+              "flowName": "ListProcesses"
             },
             "startedAt": "44000000",
             "state": "RUNNING",
@@ -4448,8 +4687,7 @@
             },
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "Interrogate",
-              "notifyToUser": true
+              "flowName": "Interrogate"
             },
             "startedAt": "43000000",
             "state": "RUNNING",
@@ -4474,8 +4712,7 @@
             "name": "Interrogate",
             "runnerArgs": {
               "clientId": "aff4:/C.1000000000000000",
-              "flowName": "Interrogate",
-              "notifyToUser": true
+              "flowName": "Interrogate"
             },
             "startedAt": "43000000",
             "state": "RUNNING",
@@ -4883,19 +5120,17 @@
           {
             "clientId": "C.1000000000000000",
             "payload": {
-              "@type": "type.googleapis.com/google.protobuf.StringValue",
-              "value": "blah1"
+              "@type": "type.googleapis.com/grr.DummyFlowResult",
+              "flowOutput": "blah1"
             },
-            "payloadType": "RDFString",
             "timestamp": "2000000"
           },
           {
             "clientId": "C.1000000000000000",
             "payload": {
-              "@type": "type.googleapis.com/google.protobuf.StringValue",
-              "value": "blah2-foo"
+              "@type": "type.googleapis.com/grr.DummyFlowResult",
+              "flowOutput": "blah2-foo"
             },
-            "payloadType": "RDFString",
             "timestamp": "43000000"
           }
         ],
@@ -4912,10 +5147,9 @@
           {
             "clientId": "C.1000000000000000",
             "payload": {
-              "@type": "type.googleapis.com/google.protobuf.StringValue",
-              "value": "blah1"
+              "@type": "type.googleapis.com/grr.DummyFlowResult",
+              "flowOutput": "blah1"
             },
-            "payloadType": "RDFString",
             "timestamp": "2000000"
           }
         ],
@@ -4932,10 +5166,9 @@
           {
             "clientId": "C.1000000000000000",
             "payload": {
-              "@type": "type.googleapis.com/google.protobuf.StringValue",
-              "value": "blah2-foo"
+              "@type": "type.googleapis.com/grr.DummyFlowResult",
+              "flowOutput": "blah2-foo"
             },
-            "payloadType": "RDFString",
             "timestamp": "43000000"
           }
         ],
@@ -4952,10 +5185,9 @@
           {
             "clientId": "C.1000000000000000",
             "payload": {
-              "@type": "type.googleapis.com/google.protobuf.StringValue",
-              "value": "blah2-foo"
+              "@type": "type.googleapis.com/grr.DummyFlowResult",
+              "flowOutput": "blah2-foo"
             },
-            "payloadType": "RDFString",
             "timestamp": "43000000"
           }
         ],

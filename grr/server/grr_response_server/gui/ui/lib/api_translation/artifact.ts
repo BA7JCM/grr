@@ -88,23 +88,10 @@ function translateArtifactSource(source: api.ArtifactSource): ArtifactSource {
         cmdline: [cmd, ...args].join(' '),
       };
 
-    case api.ArtifactSourceSourceType.DIRECTORY:
-      return {
-        ...base,
-        type: SourceType.DIRECTORY,
-        paths: (attributes.get('paths') as string[]) ?? [],
-      };
-
     case api.ArtifactSourceSourceType.FILE:
       return {
         ...base,
         type: SourceType.FILE,
-        paths: (attributes.get('paths') as string[]) ?? [],
-      };
-    case api.ArtifactSourceSourceType.GREP:
-      return {
-        ...base,
-        type: SourceType.GREP,
         paths: (attributes.get('paths') as string[]) ?? [],
       };
 

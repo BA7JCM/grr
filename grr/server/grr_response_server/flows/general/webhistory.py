@@ -79,7 +79,9 @@ class CollectBrowserHistory(flow_base.FlowBase):
   }
 
   def GetProgress(self) -> CollectBrowserHistoryProgress:
-    return self.state.progress
+    if hasattr(self.state, "progress"):
+      return self.state.progress
+    return CollectBrowserHistoryProgress()
 
   def GetFilesArchiveMappings(
       self, flow_results: Iterator[rdf_flow_objects.FlowResult]
@@ -120,7 +122,6 @@ class CollectBrowserHistory(flow_base.FlowBase):
       flow_id = self.CallFlow(
           collectors.ArtifactCollectorFlow.__name__,
           artifact_list=self.BROWSER_TO_ARTIFACTS_MAP[browser],
-          apply_parsers=False,
           request_data={"browser": browser},
           next_state=self.ProcessArtifactResponses.__name__)
       self.state.progress.browsers.append(

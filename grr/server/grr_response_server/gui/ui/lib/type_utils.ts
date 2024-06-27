@@ -33,9 +33,10 @@ export type DeepPartial<T> = {
     : DeepPartial<T[P]>;
 };
 
-type DeepReadonly<T> = T extends Array<infer U>
-  ? ReadonlyArray<DeepReadonly<U>>
-  : {readonly [K in keyof T]: DeepReadonly<T[K]>};
+type DeepReadonly<T> =
+  T extends Array<infer U>
+    ? ReadonlyArray<DeepReadonly<U>>
+    : {readonly [K in keyof T]: DeepReadonly<T[K]>};
 
 /** Recursively freezes an object and all its members. */
 export function deepFreeze<T>(object: T): DeepReadonly<T> {

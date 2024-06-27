@@ -19,7 +19,7 @@ as an attribute of the AFF4 object. This module defines this abstraction.
 import itertools
 import posixpath
 import re
-from typing import Sequence
+from typing import Iterable, Iterator, Optional, Sequence
 
 from grr_response_core.lib import artifact_utils
 from grr_response_core.lib import rdfvalue
@@ -28,6 +28,7 @@ from grr_response_core.lib.rdfvalues import standard as rdf_standard
 from grr_response_core.lib.rdfvalues import structs as rdf_structs
 from grr_response_proto import flows_pb2
 from grr_response_proto import jobs_pb2
+from grr_response_proto import knowledge_base_pb2
 
 
 class PathSpec(rdf_structs.RDFProtoStruct):
@@ -63,11 +64,6 @@ class PathSpec(rdf_structs.RDFProtoStruct):
   @classmethod
   def Temp(cls, **kwargs):
     return cls(pathtype=PathSpec.PathType.TMPFILE, **kwargs)
-
-  def CopyConstructor(self, other):
-    # pylint: disable=protected-access
-    self.SetRawData(other._CopyRawData())
-    # pylint: enable=protected-access
 
   def __len__(self):
     """Return the total number of path components."""
@@ -281,7 +277,7 @@ class PathSpec(rdf_structs.RDFProtoStruct):
     return client_urn.Add("/".join(result))
 
 
-def _unique(iterable):
+def _Unique(iterable: Iterable[str]) -> Sequence[str]:
   """Returns a list of unique values in preserved order."""
   return list(dict.fromkeys(iterable))
 
@@ -337,11 +333,16 @@ class GlobExpression(rdfvalue.RDFString):
     if len(self.RECURSION_REGEX.findall(self._value)) > 1:
       raise ValueError("Only one ** is permitted per path: %s." % self._value)
 
-  def Interpolate(self, knowledge_base=None):
-    kb = knowledge_base
-    patterns = artifact_utils.InterpolateKbAttributes(self._value, kb)
+  def Interpolate(
+      self,
+      knowledge_base: Optional[knowledge_base_pb2.KnowledgeBase] = None,
+  ) -> Iterator[str]:
+    interpolation = artifact_utils.KnowledgeBaseInterpolation(
+        pattern=self._value,
+        kb=knowledge_base or knowledge_base_pb2.KnowledgeBase(),
+    )
 
-    for pattern in patterns:
+    for pattern in interpolation.results:
       # Normalize the component path (this allows us to resolve ../
       # sequences).
       pattern = utils.NormalizePath(pattern.replace("\\", "/"))
@@ -349,7 +350,10 @@ class GlobExpression(rdfvalue.RDFString):
       for p in self.InterpolateGrouping(pattern):
         yield p
 
-  def InterpolateGrouping(self, pattern):
+  def InterpolateGrouping(
+      self,
+      pattern: str,
+  ) -> Iterator[str]:
     """Interpolate inline globbing groups."""
     components = []
     offset = 0
@@ -358,7 +362,7 @@ class GlobExpression(rdfvalue.RDFString):
 
       # Expand the attribute into the set of possibilities:
       alternatives = match.group(1).split(",")
-      components.append(_unique(alternatives))
+      components.append(_Unique(alternatives))
       offset = match.end()
 
     components.append([pattern[offset:]])
@@ -367,11 +371,11 @@ class GlobExpression(rdfvalue.RDFString):
     for vector in itertools.product(*components):
       yield "".join(vector)
 
-  def _ReplaceRegExGrouping(self, grouping):
+  def _ReplaceRegExGrouping(self, grouping: re.Match[str]) -> str:
     alternatives = grouping.group(1).split(",")
     return "(" + "|".join(re.escape(s) for s in alternatives) + ")"
 
-  def _ReplaceRegExPart(self, part):
+  def _ReplaceRegExPart(self, part: str) -> str:
     if part == "**/":
       return "(?:.*\\/)?"
     elif part == "*":
@@ -384,8 +388,10 @@ class GlobExpression(rdfvalue.RDFString):
       return re.escape(part)
 
   def ExplainComponents(
-      self, example_count: int, knowledge_base
-  ) -> Sequence[GlobComponentExplanation]:
+      self,
+      example_count: int,
+      knowledge_base: knowledge_base_pb2.KnowledgeBase,
+  ) -> Sequence[flows_pb2.GlobComponentExplanation]:
     """Returns a list of GlobComponentExplanations with examples."""
     parts = _COMPONENT_SPLIT_PATTERN.split(self._value)
     components = []
@@ -394,7 +400,7 @@ class GlobExpression(rdfvalue.RDFString):
       if not glob_part:
         continue
 
-      component = GlobComponentExplanation(glob_expression=glob_part)
+      component = flows_pb2.GlobComponentExplanation(glob_expression=glob_part)
 
       if GROUPING_PATTERN.match(glob_part):
         examples = self.InterpolateGrouping(glob_part)
@@ -404,23 +410,21 @@ class GlobExpression(rdfvalue.RDFString):
         # if a GlobExpression uses %%users.a%% and %%users.b%%, the underlying
         # user might be different for a and b. For the sake of explaining
         # possible values, this should still be enough.
-        try:
-          examples = artifact_utils.InterpolateKbAttributes(
-              glob_part, knowledge_base
-          )
-        except artifact_utils.Error:
-          # Interpolation can fail for many non-critical reasons, e.g. when the
-          # client is missing a KB attribute.
-          examples = []
+        interpolation = artifact_utils.KnowledgeBaseInterpolation(
+            pattern=glob_part,
+            kb=knowledge_base,
+        )
+
+        examples = interpolation.results
       else:
         examples = []
 
-      component.examples = list(itertools.islice(examples, example_count))
+      component.examples.extend(list(itertools.islice(examples, example_count)))
       components.append(component)
 
     return components
 
-  def AsRegEx(self):
+  def AsRegEx(self) -> rdf_standard.RegularExpression:
     """Return the current glob as a simple regex.
 
     Note: No interpolation is performed.

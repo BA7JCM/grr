@@ -43,11 +43,10 @@ export class ExecutePythonHackDetails extends Plugin {
   );
 
   readonly textContent$ = this.flowResultsLocalStore.results$.pipe(
-    map(
-      (results) =>
-        (
-          results[0]?.payload as ExecutePythonHackResult | undefined
-        )?.resultString?.split('\n'),
+    map((results) =>
+      (
+        results[0]?.payload as ExecutePythonHackResult | undefined
+      )?.resultString?.split('\n'),
     ),
     filter(isNonNull),
   );

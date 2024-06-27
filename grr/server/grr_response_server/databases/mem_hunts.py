@@ -9,19 +9,20 @@ from typing import AbstractSet, Collection, Dict, Iterable, List, Mapping, Optio
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib import utils
 from grr_response_core.lib.rdfvalues import client as rdf_client
-from grr_response_core.lib.rdfvalues import stats as rdf_stats
 from grr_response_proto import flows_pb2
 from grr_response_proto import hunts_pb2
 from grr_response_proto import jobs_pb2
 from grr_response_proto import objects_pb2
 from grr_response_proto import output_plugin_pb2
 from grr_response_server.databases import db
+from grr_response_server.databases import db_utils
+from grr_response_server.models import hunts
 from grr_response_server.rdfvalues import hunt_objects as rdf_hunt_objects
 from grr_response_server.rdfvalues import mig_flow_objects
 from grr_response_server.rdfvalues import mig_hunt_objects
 
 
-def UpdateHistogram(histogram: rdf_stats.StatsHistogram, value: float):
+def UpdateHistogram(histogram: jobs_pb2.StatsHistogram, value: float):
   """Puts a given value into an appropriate bin."""
   for b in histogram.bins:
     if b.range_max_value > value:
@@ -32,7 +33,7 @@ def UpdateHistogram(histogram: rdf_stats.StatsHistogram, value: float):
     histogram.bins[-1].num += 1
 
 
-def UpdateStats(running_stats: rdf_stats.RunningStats, values: Iterable[float]):
+def UpdateStats(running_stats: jobs_pb2.RunningStats, values: Iterable[float]):
   """Updates running stats with the given values."""
   sum_sq = 0
   for value in values:
@@ -52,15 +53,15 @@ def InitializeClientResourcesStats(
   stats = jobs_pb2.ClientResourcesStats()
   stats.user_cpu_stats.histogram.bins.extend([
       jobs_pb2.StatsHistogramBin(range_max_value=b)
-      for b in rdf_stats.ClientResourcesStats.CPU_STATS_BINS
+      for b in hunts.CPU_STATS_BINS
   ])
   stats.system_cpu_stats.histogram.bins.extend([
       jobs_pb2.StatsHistogramBin(range_max_value=b)
-      for b in rdf_stats.ClientResourcesStats.CPU_STATS_BINS
+      for b in hunts.CPU_STATS_BINS
   ])
   stats.network_bytes_sent_stats.histogram.bins.extend([
       jobs_pb2.StatsHistogramBin(range_max_value=b)
-      for b in rdf_stats.ClientResourcesStats.NETWORK_STATS_BINS
+      for b in hunts.NETWORK_STATS_BINS
   ])
   UpdateStats(
       stats.user_cpu_stats,
@@ -79,9 +80,7 @@ def InitializeClientResourcesStats(
       key=lambda s: s.cpu_usage.user_cpu_time + s.cpu_usage.system_cpu_time,
       reverse=True,
   )
-  stats.worst_performers.extend(
-      client_resources[: rdf_stats.ClientResourcesStats.NUM_WORST_PERFORMERS]
-  )
+  stats.worst_performers.extend(client_resources[: hunts.NUM_WORST_PERFORMERS])
 
   return stats
 
@@ -417,8 +416,7 @@ class InMemoryDBHuntMixin(object):
   def CountHuntResultsByType(self, hunt_id: str) -> Mapping[str, int]:
     result = {}
     for hr in self.ReadHuntResults(hunt_id, 0, sys.maxsize):
-      hr = mig_flow_objects.ToRDFFlowResult(hr)
-      key = hr.payload.__class__.__name__
+      key = db_utils.TypeURLToRDFTypeName(hr.payload.type_url)
       result[key] = result.setdefault(key, 0) + 1
 
     return result
@@ -531,7 +529,7 @@ class InMemoryDBHuntMixin(object):
   def ReadHuntClientResourcesStats(
       self,
       hunt_id: str,
-  ) -> rdf_stats.ClientResourcesStats:
+  ) -> jobs_pb2.ClientResourcesStats:
     """Read/calculate hunt client resources stats."""
 
     client_resources = []

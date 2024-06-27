@@ -11,7 +11,6 @@ from google.protobuf import message
 from grr_api_client import context as api_context
 from grr_api_client import errors
 from grr_api_client import utils
-from grr_response_core.lib.util import aead
 from grr_response_proto.api import flow_pb2
 from grr_response_proto.api import osquery_pb2
 from grr_response_proto.api import timeline_pb2
@@ -85,27 +84,6 @@ class FlowBase(object):
     )
     items = self._context.SendIteratorRequest("ListFlowResults", args)
     return utils.MapItemsIterator(lambda data: FlowResult(data=data), items)
-
-  def ListParsedResults(self) -> utils.ItemsIterator[FlowResult]:
-    args = flow_pb2.ApiListParsedFlowResultsArgs(
-        client_id=self.client_id, flow_id=self.flow_id
-    )
-    items = self._context.SendIteratorRequest("ListParsedFlowResults", args)
-    return utils.MapItemsIterator(lambda data: FlowResult(data=data), items)
-
-  def ListApplicableParsers(
-      self,
-  ) -> flow_pb2.ApiListFlowApplicableParsersResult:
-    """Lists parsers that are applicable to results of the flow."""
-    args = flow_pb2.ApiListFlowApplicableParsersArgs(
-        client_id=self.client_id, flow_id=self.flow_id
-    )
-
-    result = self._context.SendRequest("ListFlowApplicableParsers", args)
-    if not isinstance(result, flow_pb2.ApiListFlowApplicableParsersResult):
-      raise TypeError(f"Unexpected type: '{type(result)}'")
-
-    return result
 
   def GetExportedResultsArchive(self, plugin_name) -> utils.BinaryChunkIterator:
     args = flow_pb2.ApiGetExportedFlowResultsArgs(
@@ -289,5 +267,5 @@ class Flow(FlowBase):
 
     with input_context as input_stream:
       with output_context as output_stream:
-        decrypted_stream = aead.Decrypt(input_stream, encryption_key)
+        decrypted_stream = utils.AEADDecrypt(input_stream, encryption_key)
         shutil.copyfileobj(decrypted_stream, output_stream)
